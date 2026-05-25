@@ -1,301 +1,298 @@
 <!DOCTYPE html>
-
-// 제작자
-// 조민우 / minu@youthnaroo.or.kr
-// 버그나 코드 수정사항 알려주세요!
-
+<!-- 제작자 / 조민우 / minu@youthnaroo.or.kr / 버그나 코드 수정사항 알려주세요! -->
 <html lang="ko">
+
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>유스나루 관리자 페이지</title>
-<meta name="description" content="유스나루 활동단 공간예약 시스템 관리자 전용 페이지">
-<script src="https://cdn.tailwindcss.com"></script>
-<script src="https://unpkg.com/lucide@latest"></script>
-<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
-<script type="module">
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import {
-  getFirestore, collection, doc, setDoc, getDoc, getDocs, deleteDoc,
-  onSnapshot, query, orderBy, limit, addDoc, updateDoc,
-  where, serverTimestamp, writeBatch
-} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>유스나루 관리자 페이지</title>
+  <meta name="description" content="유스나루 활동단 공간예약 시스템 관리자 전용 페이지">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+    import {
+      getFirestore, collection, doc, setDoc, getDoc, getDocs, deleteDoc,
+      onSnapshot, query, orderBy, limit, addDoc, updateDoc,
+      where, serverTimestamp, writeBatch
+    } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
-// ========== FIREBASE CONFIG ==========
-const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_PROJECT_ID.appspot.com",
-  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
-  appId: "YOUR_APP_ID"
-};
-const IS_DEMO = firebaseConfig.apiKey === "YOUR_API_KEY";
-let app, db;
-if (!IS_DEMO) { app = initializeApp(firebaseConfig); db = getFirestore(app); }
+    // ========== FIREBASE CONFIG ==========
+    const firebaseConfig = {
+      apiKey: "YOUR_API_KEY",
+      authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+      projectId: "YOUR_PROJECT_ID",
+      storageBucket: "YOUR_PROJECT_ID.appspot.com",
+      messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+      appId: "YOUR_APP_ID"
+    };
+    const IS_DEMO = firebaseConfig.apiKey === "YOUR_API_KEY";
+    let app, db;
+    if (!IS_DEMO) { app = initializeApp(firebaseConfig); db = getFirestore(app); }
 
-// ========== CONSTANTS ==========
-const DAYS = [
-  {id:'mon',label:'월요일'},{id:'tue',label:'화요일'},{id:'wed',label:'수요일'},
-  {id:'thu',label:'목요일'},{id:'fri',label:'금요일'},{id:'sat',label:'토요일'},{id:'sun',label:'일요일'}
-];
-const HOURS = ['09:00','10:00','11:00','12:00','13:00','14:00','15:00','16:00','17:00','18:00'];
-const ALL_ROOMS = ['수영장','소리나루','나루지기실','콤마스튜디오','꿈나루실','링키실','방송미디어나루','스튜디오M','스튜디오H','체육관'];
-const ROLE_LABELS = {superadmin:'👑 주관리자', admin:'🔧 관리자', user:'👤 일반사용자'};
-const ROLE_COLORS = {superadmin:'bg-amber-100 text-amber-700 border-amber-300', admin:'bg-blue-100 text-blue-700 border-blue-300', user:'bg-slate-100 text-slate-600 border-slate-300'};
-const COLOR_OPTIONS = [
-  {key:'amber',bg:'bg-amber-100',text:'text-amber-800',border:'border-amber-300',label:'황금'},
-  {key:'sky',bg:'bg-sky-100',text:'text-sky-800',border:'border-sky-300',label:'하늘'},
-  {key:'emerald',bg:'bg-emerald-100',text:'text-emerald-800',border:'border-emerald-300',label:'초록'},
-  {key:'indigo',bg:'bg-indigo-100',text:'text-indigo-800',border:'border-indigo-300',label:'인디고'},
-  {key:'blue',bg:'bg-blue-100',text:'text-blue-800',border:'border-blue-300',label:'파랑'},
-  {key:'cyan',bg:'bg-cyan-100',text:'text-cyan-800',border:'border-cyan-300',label:'청록'},
-  {key:'orange',bg:'bg-orange-100',text:'text-orange-800',border:'border-orange-300',label:'주황'},
-  {key:'purple',bg:'bg-purple-100',text:'text-purple-800',border:'border-purple-300',label:'보라'},
-  {key:'rose',bg:'bg-rose-100',text:'text-rose-800',border:'border-rose-300',label:'장미'},
-];
+    // ========== CONSTANTS ==========
+    const DAYS = [
+      { id: 'mon', label: '월요일' }, { id: 'tue', label: '화요일' }, { id: 'wed', label: '수요일' },
+      { id: 'thu', label: '목요일' }, { id: 'fri', label: '금요일' }, { id: 'sat', label: '토요일' }, { id: 'sun', label: '일요일' }
+    ];
+    const HOURS = ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00'];
+    const ALL_ROOMS = ['수영장', '소리나루', '나루지기실', '콤마스튜디오', '꿈나루실', '링키실', '방송미디어나루', '스튜디오M', '스튜디오H', '체육관'];
+    const ROLE_LABELS = { superadmin: '👑 주관리자', admin: '🔧 관리자', user: '👤 일반사용자' };
+    const ROLE_COLORS = { superadmin: 'bg-amber-100 text-amber-700 border-amber-300', admin: 'bg-blue-100 text-blue-700 border-blue-300', user: 'bg-slate-100 text-slate-600 border-slate-300' };
+    const COLOR_OPTIONS = [
+      { key: 'amber', bg: 'bg-amber-100', text: 'text-amber-800', border: 'border-amber-300', label: '황금' },
+      { key: 'sky', bg: 'bg-sky-100', text: 'text-sky-800', border: 'border-sky-300', label: '하늘' },
+      { key: 'emerald', bg: 'bg-emerald-100', text: 'text-emerald-800', border: 'border-emerald-300', label: '초록' },
+      { key: 'indigo', bg: 'bg-indigo-100', text: 'text-indigo-800', border: 'border-indigo-300', label: '인디고' },
+      { key: 'blue', bg: 'bg-blue-100', text: 'text-blue-800', border: 'border-blue-300', label: '파랑' },
+      { key: 'cyan', bg: 'bg-cyan-100', text: 'text-cyan-800', border: 'border-cyan-300', label: '청록' },
+      { key: 'orange', bg: 'bg-orange-100', text: 'text-orange-800', border: 'border-orange-300', label: '주황' },
+      { key: 'purple', bg: 'bg-purple-100', text: 'text-purple-800', border: 'border-purple-300', label: '보라' },
+      { key: 'rose', bg: 'bg-rose-100', text: 'text-rose-800', border: 'border-rose-300', label: '장미' },
+    ];
 
-const DEFAULT_TEAMS = [
-  {id:'narujigi',name:'나루지기',fullType:'청소년운영위원회',schedule:'2,4,5주 토요일 14:00~17:00',typicalRooms:['나루지기실'],bg:'bg-amber-100',text:'text-amber-800',border:'border-amber-300',isActive:true},
-  {id:'dahim',name:'다힘',fullType:'공연동아리연합회',schedule:'평일 저녁/주말',typicalRooms:['콤마스튜디오','소리나루'],bg:'bg-sky-100',text:'text-sky-800',border:'border-sky-300',isActive:true},
-  {id:'story',name:'진로스토리텔러',fullType:'전문가 연합 활동단',schedule:'2,4주 토요일 14:00~17:00',typicalRooms:['링키실','꿈나루실'],bg:'bg-emerald-100',text:'text-emerald-800',border:'border-emerald-300',isActive:true},
-  {id:'ynbc-univ',name:'대학생미디어',fullType:'YNBC 대학생미디어활동단',schedule:'매주 금요일 14:00~17:00',typicalRooms:['방송미디어나루','스튜디오M','스튜디오H'],bg:'bg-indigo-100',text:'text-indigo-800',border:'border-indigo-300',isActive:true},
-  {id:'mascot',name:'마스코트',fullType:'마포구청소년축제기획단',schedule:'2,4주 토요일 14:00~17:00',typicalRooms:['꿈나루실'],bg:'bg-blue-100',text:'text-blue-800',border:'border-blue-300',isActive:true},
-  {id:'mulyuol',name:'물여울',fullType:'수영동아리',schedule:'매주 토요일 09:00~11:00',typicalRooms:['수영장'],bg:'bg-cyan-100',text:'text-cyan-800',border:'border-cyan-300',isActive:true},
-  {id:'halftime',name:'하프타임',fullType:'농구동아리',schedule:'매주 토요일 15:00~17:00',typicalRooms:['체육관'],bg:'bg-orange-100',text:'text-orange-800',border:'border-orange-300',isActive:true},
-  {id:'ynbc',name:'청소년방송국',fullType:'YNBC 유스나루청소년방송국',schedule:'1,3주 토요일 14:00~17:00',typicalRooms:['방송미디어나루','스튜디오M','스튜디오H'],bg:'bg-purple-100',text:'text-purple-800',border:'border-purple-300',isActive:true},
-];
+    const DEFAULT_TEAMS = [
+      { id: 'narujigi', name: '나루지기', fullType: '청소년운영위원회', schedule: '2,4,5주 토요일 14:00~17:00', typicalRooms: ['나루지기실'], bg: 'bg-amber-100', text: 'text-amber-800', border: 'border-amber-300', isActive: true },
+      { id: 'dahim', name: '다힘', fullType: '공연동아리연합회', schedule: '평일 저녁/주말', typicalRooms: ['콤마스튜디오', '소리나루'], bg: 'bg-sky-100', text: 'text-sky-800', border: 'border-sky-300', isActive: true },
+      { id: 'story', name: '진로스토리텔러', fullType: '전문가 연합 활동단', schedule: '2,4주 토요일 14:00~17:00', typicalRooms: ['링키실', '꿈나루실'], bg: 'bg-emerald-100', text: 'text-emerald-800', border: 'border-emerald-300', isActive: true },
+      { id: 'ynbc-univ', name: '대학생미디어', fullType: 'YNBC 대학생미디어활동단', schedule: '매주 금요일 14:00~17:00', typicalRooms: ['방송미디어나루', '스튜디오M', '스튜디오H'], bg: 'bg-indigo-100', text: 'text-indigo-800', border: 'border-indigo-300', isActive: true },
+      { id: 'mascot', name: '마스코트', fullType: '마포구청소년축제기획단', schedule: '2,4주 토요일 14:00~17:00', typicalRooms: ['꿈나루실'], bg: 'bg-blue-100', text: 'text-blue-800', border: 'border-blue-300', isActive: true },
+      { id: 'mulyuol', name: '물여울', fullType: '수영동아리', schedule: '매주 토요일 09:00~11:00', typicalRooms: ['수영장'], bg: 'bg-cyan-100', text: 'text-cyan-800', border: 'border-cyan-300', isActive: true },
+      { id: 'halftime', name: '하프타임', fullType: '농구동아리', schedule: '매주 토요일 15:00~17:00', typicalRooms: ['체육관'], bg: 'bg-orange-100', text: 'text-orange-800', border: 'border-orange-300', isActive: true },
+      { id: 'ynbc', name: '청소년방송국', fullType: 'YNBC 유스나루청소년방송국', schedule: '1,3주 토요일 14:00~17:00', typicalRooms: ['방송미디어나루', '스튜디오M', '스튜디오H'], bg: 'bg-purple-100', text: 'text-purple-800', border: 'border-purple-300', isActive: true },
+    ];
 
-// ========== STATE ==========
-let TEAMS = [...DEFAULT_TEAMS];
-let currentUser = null;
-let activeTab = 'dashboard';
-let clientIP = '알 수 없음';
-let logPage = {login:1, activity:1};
-const PAGE_SIZE = 20;
+    // ========== STATE ==========
+    let TEAMS = [...DEFAULT_TEAMS];
+    let currentUser = null;
+    let activeTab = 'dashboard';
+    let clientIP = '알 수 없음';
+    let logPage = { login: 1, activity: 1 };
+    const PAGE_SIZE = 20;
 
-// ========== DEMO DATA ==========
-const DEMO_USERS_PLAIN = [
-  {id:'u_admin',username:'admin',password:'youthnaroo2026!',displayName:'시스템관리자',role:'superadmin',allowedTeams:[],isActive:true,createdAt:'2026-01-01'},
-  {id:'u_mgr1',username:'manager1',password:'mgr123',displayName:'서브관리자1',role:'admin',allowedTeams:[],isActive:true,createdAt:'2026-01-15'},
-  {id:'u_naru1',username:'naru1',password:'1234',displayName:'나루지기 홍길동',role:'user',allowedTeams:['narujigi'],isActive:true,createdAt:'2026-02-01'},
-  {id:'u_dahim1',username:'dahim1',password:'1234',displayName:'다힘 김철수',role:'user',allowedTeams:['dahim'],isActive:true,createdAt:'2026-02-05'},
-  {id:'u_story1',username:'story1',password:'1234',displayName:'진로스토리 이영희',role:'user',allowedTeams:['story'],isActive:true,createdAt:'2026-02-10'},
-];
-let DEMO_USERS = [];
-let demoLoginLogs = [
-  {id:'ll1',userId:'u_admin',username:'admin',displayName:'시스템관리자',action:'login',ip:'211.234.12.88',userAgent:'Chrome/124 Mac',timestamp:new Date(Date.now()-3600000).toISOString()},
-  {id:'ll2',userId:'u_naru1',username:'naru1',displayName:'나루지기 홍길동',action:'login',ip:'125.143.77.21',userAgent:'Safari/17 iPhone',timestamp:new Date(Date.now()-7200000).toISOString()},
-  {id:'ll3',userId:'u_mgr1',username:'manager1',displayName:'서브관리자1',action:'login',ip:'211.234.12.88',userAgent:'Firefox/125 Win',timestamp:new Date(Date.now()-86400000).toISOString()},
-  {id:'ll4',userId:null,username:'unknown',displayName:'',action:'failed',ip:'183.11.22.33',userAgent:'Python-requests/2.28',timestamp:new Date(Date.now()-172800000).toISOString()},
-];
-let demoActivityLogs = [
-  {id:'al1',userId:'u_naru1',username:'naru1',displayName:'나루지기 홍길동',userRole:'user',action:'예약_생성',target:'sat 14:00 나루지기실',before:null,after:{teamName:'나루지기'},timestamp:new Date(Date.now()-3000000).toISOString()},
-  {id:'al2',userId:'u_admin',username:'admin',displayName:'시스템관리자',userRole:'superadmin',action:'고정일정_추가',target:'sat 14:00~17:00 나루지기실',before:null,after:{teamName:'나루지기'},timestamp:new Date(Date.now()-86400000).toISOString()},
-  {id:'al3',userId:'u_dahim1',username:'dahim1',displayName:'다힘 김철수',userRole:'user',action:'예약_생성',target:'fri 15:00 콤마스튜디오',before:null,after:{teamName:'다힘'},timestamp:new Date(Date.now()-172800000).toISOString()},
-];
+    // ========== DEMO DATA ==========
+    const DEMO_USERS_PLAIN = [
+      { id: 'u_admin', username: 'admin', password: 'youthnaroo2026!', displayName: '시스템관리자', role: 'superadmin', allowedTeams: [], isActive: true, createdAt: '2026-01-01' },
+      { id: 'u_mgr1', username: 'manager1', password: 'mgr123', displayName: '서브관리자1', role: 'admin', allowedTeams: [], isActive: true, createdAt: '2026-01-15' },
+      { id: 'u_naru1', username: 'naru1', password: '1234', displayName: '나루지기 홍길동', role: 'user', allowedTeams: ['narujigi'], isActive: true, createdAt: '2026-02-01' },
+      { id: 'u_dahim1', username: 'dahim1', password: '1234', displayName: '다힘 김철수', role: 'user', allowedTeams: ['dahim'], isActive: true, createdAt: '2026-02-05' },
+      { id: 'u_story1', username: 'story1', password: '1234', displayName: '진로스토리 이영희', role: 'user', allowedTeams: ['story'], isActive: true, createdAt: '2026-02-10' },
+    ];
+    let DEMO_USERS = [];
+    let demoLoginLogs = [
+      { id: 'll1', userId: 'u_admin', username: 'admin', displayName: '시스템관리자', action: 'login', ip: '211.234.12.88', userAgent: 'Chrome/124 Mac', timestamp: new Date(Date.now() - 3600000).toISOString() },
+      { id: 'll2', userId: 'u_naru1', username: 'naru1', displayName: '나루지기 홍길동', action: 'login', ip: '125.143.77.21', userAgent: 'Safari/17 iPhone', timestamp: new Date(Date.now() - 7200000).toISOString() },
+      { id: 'll3', userId: 'u_mgr1', username: 'manager1', displayName: '서브관리자1', action: 'login', ip: '211.234.12.88', userAgent: 'Firefox/125 Win', timestamp: new Date(Date.now() - 86400000).toISOString() },
+      { id: 'll4', userId: null, username: 'unknown', displayName: '', action: 'failed', ip: '183.11.22.33', userAgent: 'Python-requests/2.28', timestamp: new Date(Date.now() - 172800000).toISOString() },
+    ];
+    let demoActivityLogs = [
+      { id: 'al1', userId: 'u_naru1', username: 'naru1', displayName: '나루지기 홍길동', userRole: 'user', action: '예약_생성', target: 'sat 14:00 나루지기실', before: null, after: { teamName: '나루지기' }, timestamp: new Date(Date.now() - 3000000).toISOString() },
+      { id: 'al2', userId: 'u_admin', username: 'admin', displayName: '시스템관리자', userRole: 'superadmin', action: '고정일정_추가', target: 'sat 14:00~17:00 나루지기실', before: null, after: { teamName: '나루지기' }, timestamp: new Date(Date.now() - 86400000).toISOString() },
+      { id: 'al3', userId: 'u_dahim1', username: 'dahim1', displayName: '다힘 김철수', userRole: 'user', action: '예약_생성', target: 'fri 15:00 콤마스튜디오', before: null, after: { teamName: '다힘' }, timestamp: new Date(Date.now() - 172800000).toISOString() },
+    ];
 
-// ========== UTILS ==========
-async function hashPw(pw) {
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(pw));
-  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
-}
-function getTeam(id) { return TEAMS.find(t=>t.id===id)||null; }
-function isSuperAdmin() { return currentUser?.role==='superadmin'; }
-function isAdminOrSuper() { return currentUser && (currentUser.role==='admin'||currentUser.role==='superadmin'); }
-function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
-function fmtTime(ts) {
-  if (!ts) return '-';
-  const d = typeof ts==='string' ? new Date(ts) : (ts.seconds ? new Date(ts.seconds*1000) : new Date(ts));
-  return d.toLocaleString('ko-KR',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
-}
-function genId() { return 'u_'+Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
+    // ========== UTILS ==========
+    async function hashPw(pw) {
+      const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(pw));
+      return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+    function getTeam(id) { return TEAMS.find(t => t.id === id) || null; }
+    function isSuperAdmin() { return currentUser?.role === 'superadmin'; }
+    function isAdminOrSuper() { return currentUser && (currentUser.role === 'admin' || currentUser.role === 'superadmin'); }
+    function esc(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+    function fmtTime(ts) {
+      if (!ts) return '-';
+      const d = typeof ts === 'string' ? new Date(ts) : (ts.seconds ? new Date(ts.seconds * 1000) : new Date(ts));
+      return d.toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+    }
+    function genId() { return 'u_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
 
-function showToast(msg, type='success') {
-  const t=document.getElementById('toast'), m=document.getElementById('toast-msg');
-  if(!t||!m) return;
-  m.textContent=msg;
-  t.className='fixed bottom-6 left-1/2 -translate-x-1/2 z-[200] flex items-center gap-2 text-white px-5 py-3 rounded-2xl shadow-2xl text-sm font-semibold pointer-events-none transition-all duration-300 '+(type==='success'?'bg-emerald-600':type==='error'?'bg-red-600':'bg-blue-600');
-  t.style.opacity='1'; t.style.transform='translateX(-50%) translateY(0)';
-  clearTimeout(t._t);
-  t._t=setTimeout(()=>{t.style.opacity='0'; t.style.transform='translateX(-50%) translateY(16px)';},3000);
-}
-function showModal(id){ document.getElementById(id)?.classList.remove('hidden'); }
-function hideModal(id){ document.getElementById(id)?.classList.add('hidden'); }
+    function showToast(msg, type = 'success') {
+      const t = document.getElementById('toast'), m = document.getElementById('toast-msg');
+      if (!t || !m) return;
+      m.textContent = msg;
+      t.className = 'fixed bottom-6 left-1/2 -translate-x-1/2 z-[200] flex items-center gap-2 text-white px-5 py-3 rounded-2xl shadow-2xl text-sm font-semibold pointer-events-none transition-all duration-300 ' + (type === 'success' ? 'bg-emerald-600' : type === 'error' ? 'bg-red-600' : 'bg-blue-600');
+      t.style.opacity = '1'; t.style.transform = 'translateX(-50%) translateY(0)';
+      clearTimeout(t._t);
+      t._t = setTimeout(() => { t.style.opacity = '0'; t.style.transform = 'translateX(-50%) translateY(16px)'; }, 3000);
+    }
+    function showModal(id) { document.getElementById(id)?.classList.remove('hidden'); }
+    function hideModal(id) { document.getElementById(id)?.classList.add('hidden'); }
 
-async function fetchIP() {
-  try { clientIP=(await (await fetch('https://api.ipify.org?format=json')).json()).ip; } catch{}
-}
+    async function fetchIP() {
+      try { clientIP = (await (await fetch('https://api.ipify.org?format=json')).json()).ip; } catch { }
+    }
 
-// ========== AUTH ==========
-async function loginUser(username, password) {
-  const hash = await hashPw(password);
-  if (IS_DEMO) {
-    const u = DEMO_USERS.find(x=>x.username===username && x.passwordHash===hash && x.isActive);
-    if (!u) { addLoginLogDemo(null,username,'failed'); throw new Error('아이디 또는 비밀번호가 올바르지 않습니다.'); }
-    addLoginLogDemo(u.id,username,'login',u.displayName);
-    return {id:u.id,username:u.username,displayName:u.displayName,role:u.role,allowedTeams:u.allowedTeams};
-  }
-  const q=query(collection(db,'users'),where('username','==',username),where('isActive','==',true));
-  const snap=await getDocs(q);
-  if(snap.empty){ addLoginLog(null,username,'failed'); throw new Error('아이디 또는 비밀번호가 올바르지 않습니다.'); }
-  const d=snap.docs[0]; const ud=d.data();
-  if(ud.passwordHash!==hash){ addLoginLog(d.id,username,'failed'); throw new Error('아이디 또는 비밀번호가 올바르지 않습니다.'); }
-  addLoginLog(d.id,username,'login',ud.displayName);
-  return {id:d.id,username:ud.username,displayName:ud.displayName,role:ud.role,allowedTeams:ud.allowedTeams||[]};
-}
-async function doLogout() {
-  if(currentUser) IS_DEMO?addLoginLogDemo(currentUser.id,currentUser.username,'logout',currentUser.displayName):addLoginLog(currentUser.id,currentUser.username,'logout',currentUser.displayName);
-  sessionStorage.removeItem('ys_session');
-  currentUser=null;
-  showToast('로그아웃되었습니다.','info');
-  setTimeout(()=>showModal('login-modal'),400);
-}
+    // ========== AUTH ==========
+    async function loginUser(username, password) {
+      const hash = await hashPw(password);
+      if (IS_DEMO) {
+        const u = DEMO_USERS.find(x => x.username === username && x.passwordHash === hash && x.isActive);
+        if (!u) { addLoginLogDemo(null, username, 'failed'); throw new Error('아이디 또는 비밀번호가 올바르지 않습니다.'); }
+        addLoginLogDemo(u.id, username, 'login', u.displayName);
+        return { id: u.id, username: u.username, displayName: u.displayName, role: u.role, allowedTeams: u.allowedTeams };
+      }
+      const q = query(collection(db, 'users'), where('username', '==', username), where('isActive', '==', true));
+      const snap = await getDocs(q);
+      if (snap.empty) { addLoginLog(null, username, 'failed'); throw new Error('아이디 또는 비밀번호가 올바르지 않습니다.'); }
+      const d = snap.docs[0]; const ud = d.data();
+      if (ud.passwordHash !== hash) { addLoginLog(d.id, username, 'failed'); throw new Error('아이디 또는 비밀번호가 올바르지 않습니다.'); }
+      addLoginLog(d.id, username, 'login', ud.displayName);
+      return { id: d.id, username: ud.username, displayName: ud.displayName, role: ud.role, allowedTeams: ud.allowedTeams || [] };
+    }
+    async function doLogout() {
+      if (currentUser) IS_DEMO ? addLoginLogDemo(currentUser.id, currentUser.username, 'logout', currentUser.displayName) : addLoginLog(currentUser.id, currentUser.username, 'logout', currentUser.displayName);
+      sessionStorage.removeItem('ys_session');
+      currentUser = null;
+      showToast('로그아웃되었습니다.', 'info');
+      setTimeout(() => showModal('login-modal'), 400);
+    }
 
-// ========== LOGGING ==========
-async function addLoginLog(userId,username,action,displayName='') {
-  if(!db) return;
-  await addDoc(collection(db,'login_logs'),{userId:userId||null,username,displayName,action,ip:clientIP,userAgent:navigator.userAgent.slice(0,200),timestamp:serverTimestamp()});
-}
-function addLoginLogDemo(userId,username,action,displayName='') {
-  demoLoginLogs.unshift({id:'ll'+Date.now(),userId,username,displayName,action,ip:clientIP,userAgent:navigator.userAgent.slice(0,80),timestamp:new Date().toISOString()});
-}
-async function addActivityLog(action,target,before=null,after=null) {
-  if(!currentUser) return;
-  const d={userId:currentUser.id,username:currentUser.username,displayName:currentUser.displayName,userRole:currentUser.role,action,target,before,after};
-  if(IS_DEMO){demoActivityLogs.unshift({id:'al'+Date.now(),...d,timestamp:new Date().toISOString()});return;}
-  await addDoc(collection(db,'activity_logs'),{...d,timestamp:serverTimestamp()});
-}
+    // ========== LOGGING ==========
+    async function addLoginLog(userId, username, action, displayName = '') {
+      if (!db) return;
+      await addDoc(collection(db, 'login_logs'), { userId: userId || null, username, displayName, action, ip: clientIP, userAgent: navigator.userAgent.slice(0, 200), timestamp: serverTimestamp() });
+    }
+    function addLoginLogDemo(userId, username, action, displayName = '') {
+      demoLoginLogs.unshift({ id: 'll' + Date.now(), userId, username, displayName, action, ip: clientIP, userAgent: navigator.userAgent.slice(0, 80), timestamp: new Date().toISOString() });
+    }
+    async function addActivityLog(action, target, before = null, after = null) {
+      if (!currentUser) return;
+      const d = { userId: currentUser.id, username: currentUser.username, displayName: currentUser.displayName, userRole: currentUser.role, action, target, before, after };
+      if (IS_DEMO) { demoActivityLogs.unshift({ id: 'al' + Date.now(), ...d, timestamp: new Date().toISOString() }); return; }
+      await addDoc(collection(db, 'activity_logs'), { ...d, timestamp: serverTimestamp() });
+    }
 
-// ========== DATA ==========
-async function initDemoUsers() {
-  DEMO_USERS=[];
-  for(const u of DEMO_USERS_PLAIN) DEMO_USERS.push({...u,passwordHash:await hashPw(u.password)});
-}
-async function loadTeams() {
-  if(IS_DEMO){ TEAMS=[...DEFAULT_TEAMS]; return; }
-  try{ const s=await getDocs(collection(db,'teams')); if(!s.empty){TEAMS=[];s.forEach(d=>TEAMS.push({id:d.id,...d.data()}));} }catch{}
-}
-async function loadUsers() {
-  if(IS_DEMO) return DEMO_USERS.map(u=>({...u}));
-  const s=await getDocs(collection(db,'users'));
-  return s.docs.map(d=>({id:d.id,...d.data()}));
-}
-async function loadLoginLogs(page=1) {
-  if(IS_DEMO) return {logs:demoLoginLogs.slice((page-1)*PAGE_SIZE,page*PAGE_SIZE),total:demoLoginLogs.length};
-  const q=query(collection(db,'login_logs'),orderBy('timestamp','desc'),limit(page*PAGE_SIZE));
-  const s=await getDocs(q); const all=s.docs.map(d=>({id:d.id,...d.data()}));
-  return {logs:all.slice((page-1)*PAGE_SIZE),total:all.length};
-}
-async function loadActivityLogs(page=1) {
-  if(IS_DEMO) return {logs:demoActivityLogs.slice((page-1)*PAGE_SIZE,page*PAGE_SIZE),total:demoActivityLogs.length};
-  const q=query(collection(db,'activity_logs'),orderBy('timestamp','desc'),limit(page*PAGE_SIZE));
-  const s=await getDocs(q); const all=s.docs.map(d=>({id:d.id,...d.data()}));
-  return {logs:all.slice((page-1)*PAGE_SIZE),total:all.length};
-}
+    // ========== DATA ==========
+    async function initDemoUsers() {
+      DEMO_USERS = [];
+      for (const u of DEMO_USERS_PLAIN) DEMO_USERS.push({ ...u, passwordHash: await hashPw(u.password) });
+    }
+    async function loadTeams() {
+      if (IS_DEMO) { TEAMS = [...DEFAULT_TEAMS]; return; }
+      try { const s = await getDocs(collection(db, 'teams')); if (!s.empty) { TEAMS = []; s.forEach(d => TEAMS.push({ id: d.id, ...d.data() })); } } catch { }
+    }
+    async function loadUsers() {
+      if (IS_DEMO) return DEMO_USERS.map(u => ({ ...u }));
+      const s = await getDocs(collection(db, 'users'));
+      return s.docs.map(d => ({ id: d.id, ...d.data() }));
+    }
+    async function loadLoginLogs(page = 1) {
+      if (IS_DEMO) return { logs: demoLoginLogs.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE), total: demoLoginLogs.length };
+      const q = query(collection(db, 'login_logs'), orderBy('timestamp', 'desc'), limit(page * PAGE_SIZE));
+      const s = await getDocs(q); const all = s.docs.map(d => ({ id: d.id, ...d.data() }));
+      return { logs: all.slice((page - 1) * PAGE_SIZE), total: all.length };
+    }
+    async function loadActivityLogs(page = 1) {
+      if (IS_DEMO) return { logs: demoActivityLogs.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE), total: demoActivityLogs.length };
+      const q = query(collection(db, 'activity_logs'), orderBy('timestamp', 'desc'), limit(page * PAGE_SIZE));
+      const s = await getDocs(q); const all = s.docs.map(d => ({ id: d.id, ...d.data() }));
+      return { logs: all.slice((page - 1) * PAGE_SIZE), total: all.length };
+    }
 
-// ========== USER CRUD ==========
-async function createUser({username,displayName,password,role,allowedTeams,isActive}) {
-  const hash=await hashPw(password);
-  if(IS_DEMO) {
-    if(DEMO_USERS.find(u=>u.username===username)) throw new Error('이미 사용 중인 아이디입니다.');
-    const u={id:genId(),username,displayName,passwordHash:hash,role,allowedTeams,isActive,createdAt:new Date().toISOString(),createdBy:currentUser.displayName};
-    DEMO_USERS.push(u);
-    await addActivityLog('사용자_생성',username,null,{role,allowedTeams});
-    return;
-  }
-  const q=query(collection(db,'users'),where('username','==',username));
-  if(!(await getDocs(q)).empty) throw new Error('이미 사용 중인 아이디입니다.');
-  const ref=doc(collection(db,'users'));
-  await setDoc(ref,{username,displayName,passwordHash:hash,role,allowedTeams,isActive,createdAt:serverTimestamp(),createdBy:currentUser.displayName});
-  await addActivityLog('사용자_생성',username,null,{role,allowedTeams});
-}
-async function updateUser(id,{displayName,password,role,allowedTeams,isActive},oldData) {
-  if(IS_DEMO) {
-    const u=DEMO_USERS.find(x=>x.id===id);
-    if(!u) throw new Error('사용자 없음');
-    const prev={...u};
-    u.displayName=displayName; u.role=role; u.allowedTeams=allowedTeams; u.isActive=isActive;
-    if(password) u.passwordHash=await hashPw(password);
-    await addActivityLog('사용자_수정',u.username,prev,{displayName,role,allowedTeams,isActive});
-    return;
-  }
-  const upd={displayName,role,allowedTeams,isActive,updatedAt:serverTimestamp()};
-  if(password) upd.passwordHash=await hashPw(password);
-  await updateDoc(doc(db,'users',id),upd);
-  await addActivityLog('사용자_수정',oldData.username,oldData,{displayName,role,allowedTeams,isActive});
-}
-async function deleteUser(id,username) {
-  if(IS_DEMO){ DEMO_USERS=DEMO_USERS.filter(u=>u.id!==id); await addActivityLog('사용자_삭제',username,null,null); return; }
-  await deleteDoc(doc(db,'users',id));
-  await addActivityLog('사용자_삭제',username,null,null);
-}
+    // ========== USER CRUD ==========
+    async function createUser({ username, displayName, password, role, allowedTeams, isActive }) {
+      const hash = await hashPw(password);
+      if (IS_DEMO) {
+        if (DEMO_USERS.find(u => u.username === username)) throw new Error('이미 사용 중인 아이디입니다.');
+        const u = { id: genId(), username, displayName, passwordHash: hash, role, allowedTeams, isActive, createdAt: new Date().toISOString(), createdBy: currentUser.displayName };
+        DEMO_USERS.push(u);
+        await addActivityLog('사용자_생성', username, null, { role, allowedTeams });
+        return;
+      }
+      const q = query(collection(db, 'users'), where('username', '==', username));
+      if (!(await getDocs(q)).empty) throw new Error('이미 사용 중인 아이디입니다.');
+      const ref = doc(collection(db, 'users'));
+      await setDoc(ref, { username, displayName, passwordHash: hash, role, allowedTeams, isActive, createdAt: serverTimestamp(), createdBy: currentUser.displayName });
+      await addActivityLog('사용자_생성', username, null, { role, allowedTeams });
+    }
+    async function updateUser(id, { displayName, password, role, allowedTeams, isActive }, oldData) {
+      if (IS_DEMO) {
+        const u = DEMO_USERS.find(x => x.id === id);
+        if (!u) throw new Error('사용자 없음');
+        const prev = { ...u };
+        u.displayName = displayName; u.role = role; u.allowedTeams = allowedTeams; u.isActive = isActive;
+        if (password) u.passwordHash = await hashPw(password);
+        await addActivityLog('사용자_수정', u.username, prev, { displayName, role, allowedTeams, isActive });
+        return;
+      }
+      const upd = { displayName, role, allowedTeams, isActive, updatedAt: serverTimestamp() };
+      if (password) upd.passwordHash = await hashPw(password);
+      await updateDoc(doc(db, 'users', id), upd);
+      await addActivityLog('사용자_수정', oldData.username, oldData, { displayName, role, allowedTeams, isActive });
+    }
+    async function deleteUser(id, username) {
+      if (IS_DEMO) { DEMO_USERS = DEMO_USERS.filter(u => u.id !== id); await addActivityLog('사용자_삭제', username, null, null); return; }
+      await deleteDoc(doc(db, 'users', id));
+      await addActivityLog('사용자_삭제', username, null, null);
+    }
 
-// ========== TEAM CRUD ==========
-async function createTeam(data) {
-  if(IS_DEMO){ TEAMS.push({...data,isActive:true}); await addActivityLog('활동단_추가',data.name,null,data); return; }
-  await setDoc(doc(db,'teams',data.id),{...data,isActive:true,createdAt:serverTimestamp()});
-  await addActivityLog('활동단_추가',data.name,null,data);
-}
-async function updateTeam(id,data,old) {
-  if(IS_DEMO){ const i=TEAMS.findIndex(t=>t.id===id); if(i>=0) TEAMS[i]={...TEAMS[i],...data}; await addActivityLog('활동단_수정',data.name,old,data); return; }
-  await updateDoc(doc(db,'teams',id),{...data,updatedAt:serverTimestamp()});
-  await addActivityLog('활동단_수정',data.name,old,data);
-}
-async function deleteTeam(id,name) {
-  if(IS_DEMO){ TEAMS=TEAMS.filter(t=>t.id!==id); await addActivityLog('활동단_삭제',name,null,null); return; }
-  await deleteDoc(doc(db,'teams',id));
-  await addActivityLog('활동단_삭제',name,null,null);
-}
+    // ========== TEAM CRUD ==========
+    async function createTeam(data) {
+      if (IS_DEMO) { TEAMS.push({ ...data, isActive: true }); await addActivityLog('활동단_추가', data.name, null, data); return; }
+      await setDoc(doc(db, 'teams', data.id), { ...data, isActive: true, createdAt: serverTimestamp() });
+      await addActivityLog('활동단_추가', data.name, null, data);
+    }
+    async function updateTeam(id, data, old) {
+      if (IS_DEMO) { const i = TEAMS.findIndex(t => t.id === id); if (i >= 0) TEAMS[i] = { ...TEAMS[i], ...data }; await addActivityLog('활동단_수정', data.name, old, data); return; }
+      await updateDoc(doc(db, 'teams', id), { ...data, updatedAt: serverTimestamp() });
+      await addActivityLog('활동단_수정', data.name, old, data);
+    }
+    async function deleteTeam(id, name) {
+      if (IS_DEMO) { TEAMS = TEAMS.filter(t => t.id !== id); await addActivityLog('활동단_삭제', name, null, null); return; }
+      await deleteDoc(doc(db, 'teams', id));
+      await addActivityLog('활동단_삭제', name, null, null);
+    }
 
-// ========== DASHBOARD STATS ==========
-async function getDashboardStats() {
-  if(IS_DEMO) {
-    return { totalUsers:DEMO_USERS.length, activeUsers:DEMO_USERS.filter(u=>u.isActive).length, totalTeams:TEAMS.length, recentLogs:demoActivityLogs.slice(0,5) };
-  }
-  const [uSnap,tSnap]=await Promise.all([getDocs(collection(db,'users')),getDocs(collection(db,'teams'))]);
-  const q=query(collection(db,'activity_logs'),orderBy('timestamp','desc'),limit(5));
-  const lSnap=await getDocs(q);
-  return {
-    totalUsers:uSnap.size, activeUsers:uSnap.docs.filter(d=>d.data().isActive).length,
-    totalTeams:tSnap.size, recentLogs:lSnap.docs.map(d=>({id:d.id,...d.data()}))
-  };
-}
+    // ========== DASHBOARD STATS ==========
+    async function getDashboardStats() {
+      if (IS_DEMO) {
+        return { totalUsers: DEMO_USERS.length, activeUsers: DEMO_USERS.filter(u => u.isActive).length, totalTeams: TEAMS.length, recentLogs: demoActivityLogs.slice(0, 5) };
+      }
+      const [uSnap, tSnap] = await Promise.all([getDocs(collection(db, 'users')), getDocs(collection(db, 'teams'))]);
+      const q = query(collection(db, 'activity_logs'), orderBy('timestamp', 'desc'), limit(5));
+      const lSnap = await getDocs(q);
+      return {
+        totalUsers: uSnap.size, activeUsers: uSnap.docs.filter(d => d.data().isActive).length,
+        totalTeams: tSnap.size, recentLogs: lSnap.docs.map(d => ({ id: d.id, ...d.data() }))
+      };
+    }
 
-// ========== RENDER: TABS ==========
-function setActiveTab(tab) {
-  activeTab=tab;
-  document.querySelectorAll('[data-tab]').forEach(el=>{
-    const isActive=el.dataset.tab===tab;
-    el.classList.toggle('bg-slate-800',isActive);
-    el.classList.toggle('text-white',isActive);
-    el.classList.toggle('text-slate-400',!isActive);
-    el.classList.toggle('hover:bg-slate-700',!isActive);
-    el.classList.toggle('hover:text-white',!isActive);
-  });
-  document.querySelectorAll('[data-panel]').forEach(el=>{
-    el.classList.toggle('hidden',el.dataset.panel!==tab);
-  });
-  renderTab(tab);
-}
+    // ========== RENDER: TABS ==========
+    function setActiveTab(tab) {
+      activeTab = tab;
+      document.querySelectorAll('[data-tab]').forEach(el => {
+        const isActive = el.dataset.tab === tab;
+        el.classList.toggle('bg-slate-800', isActive);
+        el.classList.toggle('text-white', isActive);
+        el.classList.toggle('text-slate-400', !isActive);
+        el.classList.toggle('hover:bg-slate-700', !isActive);
+        el.classList.toggle('hover:text-white', !isActive);
+      });
+      document.querySelectorAll('[data-panel]').forEach(el => {
+        el.classList.toggle('hidden', el.dataset.panel !== tab);
+      });
+      renderTab(tab);
+    }
 
-async function renderTab(tab) {
-  if(tab==='dashboard') await renderDashboard();
-  else if(tab==='users') await renderUsers();
-  else if(tab==='teams') renderTeams();
-  else if(tab==='login-logs') await renderLoginLogs(logPage.login);
-  else if(tab==='activity-logs') await renderActivityLogs(logPage.activity);
-  else if(tab==='archive') await renderArchive();
-}
+    async function renderTab(tab) {
+      if (tab === 'dashboard') await renderDashboard();
+      else if (tab === 'users') await renderUsers();
+      else if (tab === 'teams') renderTeams();
+      else if (tab === 'login-logs') await renderLoginLogs(logPage.login);
+      else if (tab === 'activity-logs') await renderActivityLogs(logPage.activity);
+      else if (tab === 'archive') await renderArchive();
+    }
 
-// ========== RENDER: DASHBOARD ==========
-async function renderDashboard() {
-  const panel=document.getElementById('panel-dashboard');
-  if(!panel) return;
-  panel.innerHTML=`<div class="text-center py-16 text-slate-400"><div class="w-8 h-8 border-4 border-slate-200 border-t-teal-500 rounded-full animate-spin mx-auto mb-4"></div>로딩 중...</div>`;
-  const stats=await getDashboardStats();
-  const ACTION_COLOR={'예약_생성':'bg-emerald-100 text-emerald-700','예약_취소':'bg-slate-100 text-slate-600','예약_강제취소':'bg-red-100 text-red-700','고정일정_추가':'bg-blue-100 text-blue-700','고정일정_삭제':'bg-orange-100 text-orange-700','주간리셋':'bg-purple-100 text-purple-700','사용자_생성':'bg-teal-100 text-teal-700','사용자_수정':'bg-yellow-100 text-yellow-700','사용자_삭제':'bg-red-100 text-red-700','활동단_추가':'bg-indigo-100 text-indigo-700','활동단_삭제':'bg-rose-100 text-rose-700'};
-  panel.innerHTML=`
+    // ========== RENDER: DASHBOARD ==========
+    async function renderDashboard() {
+      const panel = document.getElementById('panel-dashboard');
+      if (!panel) return;
+      panel.innerHTML = `<div class="text-center py-16 text-slate-400"><div class="w-8 h-8 border-4 border-slate-200 border-t-teal-500 rounded-full animate-spin mx-auto mb-4"></div>로딩 중...</div>`;
+      const stats = await getDashboardStats();
+      const ACTION_COLOR = { '예약_생성': 'bg-emerald-100 text-emerald-700', '예약_취소': 'bg-slate-100 text-slate-600', '예약_강제취소': 'bg-red-100 text-red-700', '고정일정_추가': 'bg-blue-100 text-blue-700', '고정일정_삭제': 'bg-orange-100 text-orange-700', '주간리셋': 'bg-purple-100 text-purple-700', '사용자_생성': 'bg-teal-100 text-teal-700', '사용자_수정': 'bg-yellow-100 text-yellow-700', '사용자_삭제': 'bg-red-100 text-red-700', '활동단_추가': 'bg-indigo-100 text-indigo-700', '활동단_삭제': 'bg-rose-100 text-rose-700' };
+      panel.innerHTML = `
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
       <div class="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex items-center gap-4">
         <div class="bg-teal-100 text-teal-600 p-3 rounded-xl"><i data-lucide="users" class="w-6 h-6"></i></div>
@@ -321,14 +318,14 @@ async function renderDashboard() {
           <button onclick="setActiveTab('activity-logs')" class="text-xs text-teal-600 hover:underline">전체 보기</button>
         </div>
         <div class="divide-y divide-slate-50">
-          ${stats.recentLogs.length===0?`<div class="text-center py-10 text-slate-400 text-sm">활동 기록이 없습니다</div>`:
-          stats.recentLogs.map(log=>`
+          ${stats.recentLogs.length === 0 ? `<div class="text-center py-10 text-slate-400 text-sm">활동 기록이 없습니다</div>` :
+          stats.recentLogs.map(log => `
             <div class="px-5 py-3 flex items-center gap-3 hover:bg-slate-50">
-              <span class="px-2 py-0.5 text-[10px] font-bold rounded-full border ${ROLE_COLORS[log.userRole]||'bg-slate-100 text-slate-600 border-slate-300'}">${log.userRole==='superadmin'?'주관':'관리자'===log.userRole?'관':''}</span>
+              <span class="px-2 py-0.5 text-[10px] font-bold rounded-full border ${ROLE_COLORS[log.userRole] || 'bg-slate-100 text-slate-600 border-slate-300'}">${log.userRole === 'superadmin' ? '주관' : '관리자' === log.userRole ? '관' : ''}</span>
               <div class="flex-grow min-w-0">
                 <div class="text-xs font-semibold text-slate-800 truncate">${esc(log.displayName)} <span class="font-normal text-slate-400">(${esc(log.username)})</span></div>
                 <div class="flex items-center gap-2 mt-0.5">
-                  <span class="px-1.5 py-0.5 text-[9px] font-bold rounded ${ACTION_COLOR[log.action]||'bg-slate-100 text-slate-600'}">${esc(log.action)}</span>
+                  <span class="px-1.5 py-0.5 text-[9px] font-bold rounded ${ACTION_COLOR[log.action] || 'bg-slate-100 text-slate-600'}">${esc(log.action)}</span>
                   <span class="text-[10px] text-slate-400 truncate">${esc(log.target)}</span>
                 </div>
               </div>
@@ -367,16 +364,16 @@ async function renderDashboard() {
         </div>
       </div>
     </div>`;
-  lucide.createIcons();
-}
+      lucide.createIcons();
+    }
 
-// ========== RENDER: USERS ==========
-async function renderUsers() {
-  const panel=document.getElementById('panel-users');
-  if(!panel) return;
-  panel.innerHTML=`<div class="text-center py-16 text-slate-400"><div class="w-8 h-8 border-4 border-slate-200 border-t-teal-500 rounded-full animate-spin mx-auto mb-4"></div>로딩 중...</div>`;
-  const users=await loadUsers();
-  panel.innerHTML=`
+    // ========== RENDER: USERS ==========
+    async function renderUsers() {
+      const panel = document.getElementById('panel-users');
+      if (!panel) return;
+      panel.innerHTML = `<div class="text-center py-16 text-slate-400"><div class="w-8 h-8 border-4 border-slate-200 border-t-teal-500 rounded-full animate-spin mx-auto mb-4"></div>로딩 중...</div>`;
+      const users = await loadUsers();
+      panel.innerHTML = `
     <div class="flex items-center justify-between mb-4 flex-wrap gap-3">
       <div>
         <h2 class="text-base font-bold text-slate-800">사용자 관리</h2>
@@ -398,23 +395,23 @@ async function renderUsers() {
             <th class="px-4 py-3 text-xs font-bold text-slate-500 text-right">작업</th>
           </tr></thead>
           <tbody class="divide-y divide-slate-50">
-            ${users.map(u=>`
+            ${users.map(u => `
               <tr class="hover:bg-slate-50 transition-colors" data-uid="${esc(u.id)}">
                 <td class="px-4 py-3 font-mono text-xs text-slate-700 font-semibold">${esc(u.username)}</td>
                 <td class="px-4 py-3 text-sm font-medium text-slate-800">${esc(u.displayName)}</td>
-                <td class="px-4 py-3"><span class="px-2 py-0.5 text-[10px] font-bold rounded-full border ${ROLE_COLORS[u.role]||'bg-slate-100 text-slate-600 border-slate-300'}">${ROLE_LABELS[u.role]||u.role}</span></td>
+                <td class="px-4 py-3"><span class="px-2 py-0.5 text-[10px] font-bold rounded-full border ${ROLE_COLORS[u.role] || 'bg-slate-100 text-slate-600 border-slate-300'}">${ROLE_LABELS[u.role] || u.role}</span></td>
                 <td class="px-4 py-3 max-w-[220px]">
-                  ${u.role!=='user'?`<span class="text-[10px] text-slate-400 italic">전체 활동단</span>`:
-                    (u.allowedTeams||[]).length===0?`<span class="text-[10px] text-red-400">배정 없음</span>`:
-                    (u.allowedTeams||[]).map(tid=>{const t=getTeam(tid);return`<span class="inline-block px-1.5 py-0.5 text-[9px] font-bold rounded mr-1 mb-0.5 ${t?`${t.bg} ${t.text}`:''}">${t?t.name:tid}</span>`;}).join('')}
+                  ${u.role !== 'user' ? `<span class="text-[10px] text-slate-400 italic">전체 활동단</span>` :
+          (u.allowedTeams || []).length === 0 ? `<span class="text-[10px] text-red-400">배정 없음</span>` :
+            (u.allowedTeams || []).map(tid => { const t = getTeam(tid); return `<span class="inline-block px-1.5 py-0.5 text-[9px] font-bold rounded mr-1 mb-0.5 ${t ? `${t.bg} ${t.text}` : ''}">${t ? t.name : tid}</span>`; }).join('')}
                 </td>
                 <td class="px-4 py-3">
-                  <span class="px-2 py-0.5 text-[10px] font-bold rounded-full ${u.isActive?'bg-emerald-100 text-emerald-700':'bg-slate-100 text-slate-500'}">${u.isActive?'✓ 활성':'✗ 비활성'}</span>
+                  <span class="px-2 py-0.5 text-[10px] font-bold rounded-full ${u.isActive ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}">${u.isActive ? '✓ 활성' : '✗ 비활성'}</span>
                 </td>
                 <td class="px-4 py-3 text-right">
                   <div class="flex items-center justify-end gap-1">
                     <button onclick="openUserModal(${JSON.stringify(esc(u.id))})" class="p-1.5 rounded-lg hover:bg-blue-100 text-blue-600 transition-colors" title="수정"><i data-lucide="pencil" class="w-3.5 h-3.5"></i></button>
-                    ${u.role==='superadmin'&&!isSuperAdmin()?`<button class="p-1.5 rounded-lg text-slate-300 cursor-not-allowed" title="주관리자 삭제 불가"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button>`:`<button onclick="confirmDeleteUser(${JSON.stringify(esc(u.id))},${JSON.stringify(esc(u.username))})" class="p-1.5 rounded-lg hover:bg-red-100 text-red-500 transition-colors" title="삭제"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button>`}
+                    ${u.role === 'superadmin' && !isSuperAdmin() ? `<button class="p-1.5 rounded-lg text-slate-300 cursor-not-allowed" title="주관리자 삭제 불가"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button>` : `<button onclick="confirmDeleteUser(${JSON.stringify(esc(u.id))},${JSON.stringify(esc(u.username))})" class="p-1.5 rounded-lg hover:bg-red-100 text-red-500 transition-colors" title="삭제"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button>`}
                   </div>
                 </td>
               </tr>
@@ -423,14 +420,14 @@ async function renderUsers() {
         </table>
       </div>
     </div>`;
-  lucide.createIcons();
-}
+      lucide.createIcons();
+    }
 
-// ========== RENDER: TEAMS ==========
-function renderTeams() {
-  const panel=document.getElementById('panel-teams');
-  if(!panel) return;
-  panel.innerHTML=`
+    // ========== RENDER: TEAMS ==========
+    function renderTeams() {
+      const panel = document.getElementById('panel-teams');
+      if (!panel) return;
+      panel.innerHTML = `
     <div class="flex items-center justify-between mb-4 flex-wrap gap-3">
       <div>
         <h2 class="text-base font-bold text-slate-800">활동단 관리</h2>
@@ -441,7 +438,7 @@ function renderTeams() {
       </button>
     </div>
     <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-      ${TEAMS.map(t=>`
+      ${TEAMS.map(t => `
         <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           <div class="p-4 ${t.bg} border-b ${t.border}">
             <div class="flex items-start justify-between gap-2">
@@ -456,24 +453,24 @@ function renderTeams() {
             </div>
           </div>
           <div class="p-4 space-y-2 text-xs">
-            <div class="flex items-center gap-2 text-slate-600"><i data-lucide="clock" class="w-3.5 h-3.5 text-slate-400 flex-shrink-0"></i><span>${esc(t.schedule||'-')}</span></div>
-            <div class="flex items-start gap-2 text-slate-600"><i data-lucide="map-pin" class="w-3.5 h-3.5 text-slate-400 flex-shrink-0 mt-0.5"></i><div class="flex flex-wrap gap-1">${(t.typicalRooms||[]).map(r=>`<span class="bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded text-[9px]">${esc(r)}</span>`).join('')}</div></div>
+            <div class="flex items-center gap-2 text-slate-600"><i data-lucide="clock" class="w-3.5 h-3.5 text-slate-400 flex-shrink-0"></i><span>${esc(t.schedule || '-')}</span></div>
+            <div class="flex items-start gap-2 text-slate-600"><i data-lucide="map-pin" class="w-3.5 h-3.5 text-slate-400 flex-shrink-0 mt-0.5"></i><div class="flex flex-wrap gap-1">${(t.typicalRooms || []).map(r => `<span class="bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded text-[9px]">${esc(r)}</span>`).join('')}</div></div>
           </div>
         </div>
       `).join('')}
     </div>`;
-  lucide.createIcons();
-}
+      lucide.createIcons();
+    }
 
-// ========== RENDER: LOGIN LOGS ==========
-async function renderLoginLogs(page=1) {
-  const panel=document.getElementById('panel-login-logs');
-  if(!panel) return;
-  panel.innerHTML=`<div class="text-center py-16 text-slate-400"><div class="w-8 h-8 border-4 border-slate-200 border-t-teal-500 rounded-full animate-spin mx-auto mb-4"></div>로딩 중...</div>`;
-  const {logs,total}=await loadLoginLogs(page);
-  const ACTION_STYLE={login:'bg-emerald-100 text-emerald-700',logout:'bg-slate-100 text-slate-600',failed:'bg-red-100 text-red-700'};
-  const totalPages=Math.ceil(total/PAGE_SIZE);
-  panel.innerHTML=`
+    // ========== RENDER: LOGIN LOGS ==========
+    async function renderLoginLogs(page = 1) {
+      const panel = document.getElementById('panel-login-logs');
+      if (!panel) return;
+      panel.innerHTML = `<div class="text-center py-16 text-slate-400"><div class="w-8 h-8 border-4 border-slate-200 border-t-teal-500 rounded-full animate-spin mx-auto mb-4"></div>로딩 중...</div>`;
+      const { logs, total } = await loadLoginLogs(page);
+      const ACTION_STYLE = { login: 'bg-emerald-100 text-emerald-700', logout: 'bg-slate-100 text-slate-600', failed: 'bg-red-100 text-red-700' };
+      const totalPages = Math.ceil(total / PAGE_SIZE);
+      panel.innerHTML = `
     <div class="flex items-center justify-between mb-4">
       <div><h2 class="text-base font-bold text-slate-800">로그인 로그</h2><p class="text-xs text-slate-400">총 ${total}건</p></div>
     </div>
@@ -488,39 +485,39 @@ async function renderLoginLogs(page=1) {
             <th class="px-4 py-3 text-xs font-bold text-slate-500">시간</th>
           </tr></thead>
           <tbody class="divide-y divide-slate-50">
-            ${logs.length===0?`<tr><td colspan="5" class="text-center py-12 text-slate-400 text-sm">로그인 기록이 없습니다</td></tr>`:
-            logs.map(l=>`
+            ${logs.length === 0 ? `<tr><td colspan="5" class="text-center py-12 text-slate-400 text-sm">로그인 기록이 없습니다</td></tr>` :
+          logs.map(l => `
               <tr class="hover:bg-slate-50 transition-colors">
                 <td class="px-4 py-3">
-                  <div class="text-xs font-bold text-slate-800">${esc(l.displayName)||'(알 수 없음)'}</div>
+                  <div class="text-xs font-bold text-slate-800">${esc(l.displayName) || '(알 수 없음)'}</div>
                   <div class="text-[10px] text-slate-400 font-mono">${esc(l.username)}</div>
                 </td>
-                <td class="px-4 py-3"><span class="px-2 py-0.5 text-[10px] font-bold rounded-full ${ACTION_STYLE[l.action]||'bg-slate-100 text-slate-600'}">${l.action==='login'?'✓ 로그인':l.action==='logout'?'← 로그아웃':'✗ 실패'}</span></td>
-                <td class="px-4 py-3 font-mono text-xs text-slate-600">${esc(l.ip||'-')}</td>
-                <td class="px-4 py-3 text-[10px] text-slate-500 max-w-[200px] truncate" title="${esc(l.userAgent)}">${esc((l.userAgent||'').slice(0,40))}</td>
+                <td class="px-4 py-3"><span class="px-2 py-0.5 text-[10px] font-bold rounded-full ${ACTION_STYLE[l.action] || 'bg-slate-100 text-slate-600'}">${l.action === 'login' ? '✓ 로그인' : l.action === 'logout' ? '← 로그아웃' : '✗ 실패'}</span></td>
+                <td class="px-4 py-3 font-mono text-xs text-slate-600">${esc(l.ip || '-')}</td>
+                <td class="px-4 py-3 text-[10px] text-slate-500 max-w-[200px] truncate" title="${esc(l.userAgent)}">${esc((l.userAgent || '').slice(0, 40))}</td>
                 <td class="px-4 py-3 text-xs text-slate-500">${fmtTime(l.timestamp)}</td>
               </tr>
             `).join('')}
           </tbody>
         </table>
       </div>
-      ${totalPages>1?`<div class="px-4 py-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
-        <button onclick="renderLoginLogs(${page-1})" ${page<=1?'disabled class="opacity-30 cursor-not-allowed"':'class="hover:text-teal-600"'}>← 이전</button>
+      ${totalPages > 1 ? `<div class="px-4 py-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+        <button onclick="renderLoginLogs(${page - 1})" ${page <= 1 ? 'disabled class="opacity-30 cursor-not-allowed"' : 'class="hover:text-teal-600"'}>← 이전</button>
         <span>${page} / ${totalPages}</span>
-        <button onclick="renderLoginLogs(${page+1})" ${page>=totalPages?'disabled class="opacity-30 cursor-not-allowed"':'class="hover:text-teal-600"'}>다음 →</button>
-      </div>`:''}
+        <button onclick="renderLoginLogs(${page + 1})" ${page >= totalPages ? 'disabled class="opacity-30 cursor-not-allowed"' : 'class="hover:text-teal-600"'}>다음 →</button>
+      </div>`: ''}
     </div>`;
-}
+    }
 
-// ========== RENDER: ACTIVITY LOGS ==========
-async function renderActivityLogs(page=1) {
-  const panel=document.getElementById('panel-activity-logs');
-  if(!panel) return;
-  panel.innerHTML=`<div class="text-center py-16 text-slate-400"><div class="w-8 h-8 border-4 border-slate-200 border-t-teal-500 rounded-full animate-spin mx-auto mb-4"></div>로딩 중...</div>`;
-  const {logs,total}=await loadActivityLogs(page);
-  const ACTION_COLOR={'예약_생성':'bg-emerald-100 text-emerald-700','예약_취소':'bg-slate-100 text-slate-600','예약_강제취소':'bg-red-100 text-red-700','고정일정_추가':'bg-blue-100 text-blue-700','고정일정_삭제':'bg-orange-100 text-orange-700','주간리셋':'bg-purple-100 text-purple-700','사용자_생성':'bg-teal-100 text-teal-700','사용자_수정':'bg-yellow-100 text-yellow-700','사용자_삭제':'bg-red-100 text-red-700','활동단_추가':'bg-indigo-100 text-indigo-700','활동단_수정':'bg-sky-100 text-sky-700','활동단_삭제':'bg-rose-100 text-rose-700'};
-  const totalPages=Math.ceil(total/PAGE_SIZE);
-  panel.innerHTML=`
+    // ========== RENDER: ACTIVITY LOGS ==========
+    async function renderActivityLogs(page = 1) {
+      const panel = document.getElementById('panel-activity-logs');
+      if (!panel) return;
+      panel.innerHTML = `<div class="text-center py-16 text-slate-400"><div class="w-8 h-8 border-4 border-slate-200 border-t-teal-500 rounded-full animate-spin mx-auto mb-4"></div>로딩 중...</div>`;
+      const { logs, total } = await loadActivityLogs(page);
+      const ACTION_COLOR = { '예약_생성': 'bg-emerald-100 text-emerald-700', '예약_취소': 'bg-slate-100 text-slate-600', '예약_강제취소': 'bg-red-100 text-red-700', '고정일정_추가': 'bg-blue-100 text-blue-700', '고정일정_삭제': 'bg-orange-100 text-orange-700', '주간리셋': 'bg-purple-100 text-purple-700', '사용자_생성': 'bg-teal-100 text-teal-700', '사용자_수정': 'bg-yellow-100 text-yellow-700', '사용자_삭제': 'bg-red-100 text-red-700', '활동단_추가': 'bg-indigo-100 text-indigo-700', '활동단_수정': 'bg-sky-100 text-sky-700', '활동단_삭제': 'bg-rose-100 text-rose-700' };
+      const totalPages = Math.ceil(total / PAGE_SIZE);
+      panel.innerHTML = `
     <div class="flex items-center justify-between mb-4">
       <div><h2 class="text-base font-bold text-slate-800">활동 로그</h2><p class="text-xs text-slate-400">총 ${total}건</p></div>
     </div>
@@ -535,15 +532,15 @@ async function renderActivityLogs(page=1) {
             <th class="px-4 py-3 text-xs font-bold text-slate-500">시간</th>
           </tr></thead>
           <tbody class="divide-y divide-slate-50">
-            ${logs.length===0?`<tr><td colspan="5" class="text-center py-12 text-slate-400 text-sm">활동 기록이 없습니다</td></tr>`:
-            logs.map(l=>`
+            ${logs.length === 0 ? `<tr><td colspan="5" class="text-center py-12 text-slate-400 text-sm">활동 기록이 없습니다</td></tr>` :
+          logs.map(l => `
               <tr class="hover:bg-slate-50 transition-colors">
                 <td class="px-4 py-3">
                   <div class="text-xs font-bold text-slate-800">${esc(l.displayName)}</div>
                   <div class="text-[10px] text-slate-400 font-mono">${esc(l.username)}</div>
                 </td>
-                <td class="px-4 py-3"><span class="px-1.5 py-0.5 text-[9px] font-bold rounded-full border ${ROLE_COLORS[l.userRole]||'bg-slate-100 text-slate-600 border-slate-300'}">${ROLE_LABELS[l.userRole]||l.userRole}</span></td>
-                <td class="px-4 py-3"><span class="px-2 py-0.5 text-[10px] font-bold rounded-full ${ACTION_COLOR[l.action]||'bg-slate-100 text-slate-600'}">${esc(l.action)}</span></td>
+                <td class="px-4 py-3"><span class="px-1.5 py-0.5 text-[9px] font-bold rounded-full border ${ROLE_COLORS[l.userRole] || 'bg-slate-100 text-slate-600 border-slate-300'}">${ROLE_LABELS[l.userRole] || l.userRole}</span></td>
+                <td class="px-4 py-3"><span class="px-2 py-0.5 text-[10px] font-bold rounded-full ${ACTION_COLOR[l.action] || 'bg-slate-100 text-slate-600'}">${esc(l.action)}</span></td>
                 <td class="px-4 py-3 text-xs text-slate-600 max-w-[200px] truncate" title="${esc(l.target)}">${esc(l.target)}</td>
                 <td class="px-4 py-3 text-xs text-slate-500">${fmtTime(l.timestamp)}</td>
               </tr>
@@ -551,23 +548,23 @@ async function renderActivityLogs(page=1) {
           </tbody>
         </table>
       </div>
-      ${totalPages>1?`<div class="px-4 py-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
-        <button onclick="renderActivityLogs(${page-1})" ${page<=1?'disabled class="opacity-30 cursor-not-allowed"':'class="hover:text-teal-600"'}>← 이전</button>
+      ${totalPages > 1 ? `<div class="px-4 py-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+        <button onclick="renderActivityLogs(${page - 1})" ${page <= 1 ? 'disabled class="opacity-30 cursor-not-allowed"' : 'class="hover:text-teal-600"'}>← 이전</button>
         <span>${page} / ${totalPages}</span>
-        <button onclick="renderActivityLogs(${page+1})" ${page>=totalPages?'disabled class="opacity-30 cursor-not-allowed"':'class="hover:text-teal-600"'}>다음 →</button>
-      </div>`:''}
+        <button onclick="renderActivityLogs(${page + 1})" ${page >= totalPages ? 'disabled class="opacity-30 cursor-not-allowed"' : 'class="hover:text-teal-600"'}>다음 →</button>
+      </div>`: ''}
     </div>`;
-}
+    }
 
-// ========== RENDER: ARCHIVE ==========
-async function renderArchive() {
-  const panel=document.getElementById('panel-archive');
-  if(!panel) return;
-  let weeks=[];
-  if(!IS_DEMO){
-    try{const s=await getDocs(collection(db,'archive'));s.forEach(d=>weeks.push(d.id));weeks.sort().reverse();}catch{}
-  }
-  panel.innerHTML=`
+    // ========== RENDER: ARCHIVE ==========
+    async function renderArchive() {
+      const panel = document.getElementById('panel-archive');
+      if (!panel) return;
+      let weeks = [];
+      if (!IS_DEMO) {
+        try { const s = await getDocs(collection(db, 'archive')); s.forEach(d => weeks.push(d.id)); weeks.sort().reverse(); } catch { }
+      }
+      panel.innerHTML = `
     <div class="flex items-center justify-between mb-4 flex-wrap gap-3">
       <div><h2 class="text-base font-bold text-slate-800">과거 기록 조회</h2><p class="text-xs text-slate-400">주간 리셋 후 보관된 예약 이력</p></div>
     </div>
@@ -575,8 +572,8 @@ async function renderArchive() {
       <div class="px-5 py-4 border-b border-slate-100 flex items-center gap-3">
         <label class="text-xs font-semibold text-slate-600 flex-shrink-0">주차 선택</label>
         <select id="archive-week-sel" onchange="loadArchivePanel(this.value)" class="px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-400 bg-white min-w-[180px]">
-          <option value="">${IS_DEMO?'데모 모드에서는 과거 기록 없음':'주차를 선택하세요'}</option>
-          ${weeks.map(w=>`<option value="${esc(w)}">${esc(w)}</option>`).join('')}
+          <option value="">${IS_DEMO ? '데모 모드에서는 과거 기록 없음' : '주차를 선택하세요'}</option>
+          ${weeks.map(w => `<option value="${esc(w)}">${esc(w)}</option>`).join('')}
         </select>
       </div>
       <div id="archive-content" class="p-5 min-h-[300px]">
@@ -587,498 +584,570 @@ async function renderArchive() {
         </div>
       </div>
     </div>`;
-  lucide.createIcons();
-}
+      lucide.createIcons();
+    }
 
-window.loadArchivePanel = async function(weekId) {
-  const c=document.getElementById('archive-content');
-  if(!weekId||!c) return;
-  c.innerHTML=`<div class="text-center py-12"><div class="w-8 h-8 border-4 border-slate-200 border-t-violet-500 rounded-full animate-spin mx-auto mb-3"></div></div>`;
-  if(IS_DEMO){c.innerHTML=`<div class="text-center py-12 text-slate-400 text-sm">데모 모드에서는 과거 기록이 없습니다</div>`;return;}
-  try{
-    const snap=await getDoc(doc(db,'archive',weekId));
-    if(!snap.exists()){c.innerHTML=`<div class="text-center py-12 text-slate-400 text-sm">기록을 찾을 수 없습니다</div>`;return;}
-    const data=snap.data().data;
-    let html=`<div class="flex justify-end mb-3"><button onclick="exportArchiveExcel('${esc(weekId)}')" class="flex items-center gap-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-lg hover:bg-emerald-100 transition-all"><i data-lucide="download" class="w-3.5 h-3.5"></i> 엑셀 저장</button></div>`;
-    DAYS.forEach(day=>{
-      const dd=data[day.id]||{};
-      const cnt=Object.keys(dd).length;
-      html+=`<div class="mb-6"><h4 class="text-xs font-bold text-slate-600 mb-2">${day.label} <span class="font-normal text-slate-400">(${cnt}건)</span></h4>`;
-      if(cnt>0){
-        html+=`<div class="overflow-x-auto"><table class="border-collapse text-[10px]" style="min-width:800px"><thead><tr class="bg-slate-50 border border-slate-200"><th class="px-2 py-1.5 border border-slate-200 font-bold text-slate-500 w-14">시간</th>${ALL_ROOMS.map(r=>`<th class="px-2 py-1.5 border border-slate-200 font-bold text-slate-600 min-w-[80px]">${esc(r)}</th>`).join('')}</tr></thead><tbody>`;
-        HOURS.forEach(h=>{
-          html+=`<tr><td class="px-2 py-1.5 border border-slate-200 font-bold text-slate-500 bg-slate-50 text-center">${h}</td>`;
-          ALL_ROOMS.forEach(r=>{
-            const res=dd[`${h}-${r}`];
-            if(res){const t=getTeam(res.teamId);html+=`<td class="px-2 py-1.5 border border-slate-200"><span class="px-1.5 py-0.5 rounded text-[9px] font-bold ${t?`${t.bg} ${t.text}`:'bg-slate-100 text-slate-600'}">${esc(res.teamName)}</span></td>`;}
-            else html+=`<td class="px-2 py-1.5 border border-slate-100 text-slate-200 text-center">·</td>`;
-          });
-          html+=`</tr>`;
+    window.loadArchivePanel = async function (weekId) {
+      const c = document.getElementById('archive-content');
+      if (!weekId || !c) return;
+      c.innerHTML = `<div class="text-center py-12"><div class="w-8 h-8 border-4 border-slate-200 border-t-violet-500 rounded-full animate-spin mx-auto mb-3"></div></div>`;
+      if (IS_DEMO) { c.innerHTML = `<div class="text-center py-12 text-slate-400 text-sm">데모 모드에서는 과거 기록이 없습니다</div>`; return; }
+      try {
+        const snap = await getDoc(doc(db, 'archive', weekId));
+        if (!snap.exists()) { c.innerHTML = `<div class="text-center py-12 text-slate-400 text-sm">기록을 찾을 수 없습니다</div>`; return; }
+        const data = snap.data().data;
+        let html = `<div class="flex justify-end mb-3"><button onclick="exportArchiveExcel('${esc(weekId)}')" class="flex items-center gap-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-lg hover:bg-emerald-100 transition-all"><i data-lucide="download" class="w-3.5 h-3.5"></i> 엑셀 저장</button></div>`;
+        DAYS.forEach(day => {
+          const dd = data[day.id] || {};
+          const cnt = Object.keys(dd).length;
+          html += `<div class="mb-6"><h4 class="text-xs font-bold text-slate-600 mb-2">${day.label} <span class="font-normal text-slate-400">(${cnt}건)</span></h4>`;
+          if (cnt > 0) {
+            html += `<div class="overflow-x-auto"><table class="border-collapse text-[10px]" style="min-width:800px"><thead><tr class="bg-slate-50 border border-slate-200"><th class="px-2 py-1.5 border border-slate-200 font-bold text-slate-500 w-14">시간</th>${ALL_ROOMS.map(r => `<th class="px-2 py-1.5 border border-slate-200 font-bold text-slate-600 min-w-[80px]">${esc(r)}</th>`).join('')}</tr></thead><tbody>`;
+            HOURS.forEach(h => {
+              html += `<tr><td class="px-2 py-1.5 border border-slate-200 font-bold text-slate-500 bg-slate-50 text-center">${h}</td>`;
+              ALL_ROOMS.forEach(r => {
+                const res = dd[`${h}-${r}`];
+                if (res) { const t = getTeam(res.teamId); html += `<td class="px-2 py-1.5 border border-slate-200"><span class="px-1.5 py-0.5 rounded text-[9px] font-bold ${t ? `${t.bg} ${t.text}` : 'bg-slate-100 text-slate-600'}">${esc(res.teamName)}</span></td>`; }
+                else html += `<td class="px-2 py-1.5 border border-slate-100 text-slate-200 text-center">·</td>`;
+              });
+              html += `</tr>`;
+            });
+            html += `</tbody></table></div>`;
+          }
+          html += `</div>`;
         });
-        html+=`</tbody></table></div>`;
+        c.innerHTML = html; lucide.createIcons();
+      } catch (e) { c.innerHTML = `<div class="text-center py-12 text-red-400 text-sm">${esc(e.message)}</div>`; }
+    };
+
+    window.exportArchiveExcel = async function (weekId) {
+      if (IS_DEMO) { showToast('데모 모드에서는 지원되지 않습니다', 'error'); return; }
+      showToast('엑셀 준비 중...', 'info');
+      try {
+        const snap = await getDoc(doc(db, 'archive', weekId));
+        if (!snap.exists()) { showToast('데이터 없음', 'error'); return; }
+        const data = snap.data().data;
+        const wb = XLSX.utils.book_new();
+        DAYS.forEach(day => {
+          const dd = data[day.id] || {};
+          const rows = [['시간', ...ALL_ROOMS]];
+          HOURS.forEach(h => rows.push([h, ...ALL_ROOMS.map(r => { const res = dd[`${h}-${r}`]; return res ? `${res.teamName}${res.isFixed ? ' (고정)' : ''}` : ''; })]));
+          const ws = XLSX.utils.aoa_to_sheet(rows);
+          ws['!cols'] = [{ wch: 8 }, ...ALL_ROOMS.map(() => ({ wch: 14 }))];
+          XLSX.utils.book_append_sheet(wb, ws, day.label);
+        });
+        XLSX.writeFile(wb, `유스나루_${weekId}.xlsx`);
+        showToast('엑셀 다운로드 완료!', 'success');
+      } catch (e) { showToast('실패: ' + e.message, 'error'); }
+    };
+
+    // ========== USER MODAL ==========
+    window.openUserModal = async function (uid = null) {
+      let user = null;
+      if (uid) {
+        const users = await loadUsers();
+        user = users.find(u => u.id === uid);
       }
-      html+=`</div>`;
-    });
-    c.innerHTML=html; lucide.createIcons();
-  }catch(e){c.innerHTML=`<div class="text-center py-12 text-red-400 text-sm">${esc(e.message)}</div>`;}
-};
-
-window.exportArchiveExcel = async function(weekId) {
-  if(IS_DEMO){showToast('데모 모드에서는 지원되지 않습니다','error');return;}
-  showToast('엑셀 준비 중...','info');
-  try{
-    const snap=await getDoc(doc(db,'archive',weekId));
-    if(!snap.exists()){showToast('데이터 없음','error');return;}
-    const data=snap.data().data;
-    const wb=XLSX.utils.book_new();
-    DAYS.forEach(day=>{
-      const dd=data[day.id]||{};
-      const rows=[['시간',...ALL_ROOMS]];
-      HOURS.forEach(h=>rows.push([h,...ALL_ROOMS.map(r=>{const res=dd[`${h}-${r}`];return res?`${res.teamName}${res.isFixed?' (고정)':''}`:'';})]));
-      const ws=XLSX.utils.aoa_to_sheet(rows);
-      ws['!cols']=[{wch:8},...ALL_ROOMS.map(()=>({wch:14}))];
-      XLSX.utils.book_append_sheet(wb,ws,day.label);
-    });
-    XLSX.writeFile(wb,`유스나루_${weekId}.xlsx`);
-    showToast('엑셀 다운로드 완료!','success');
-  }catch(e){showToast('실패: '+e.message,'error');}
-};
-
-// ========== USER MODAL ==========
-window.openUserModal = async function(uid=null) {
-  let user=null;
-  if(uid){
-    const users=await loadUsers();
-    user=users.find(u=>u.id===uid);
-  }
-  const isEdit=!!user;
-  // Populate team checkboxes
-  const teamCbs=TEAMS.map(t=>`
+      const isEdit = !!user;
+      // Populate team checkboxes
+      const teamCbs = TEAMS.map(t => `
     <label class="flex items-center gap-2 cursor-pointer p-2 rounded-lg hover:bg-slate-50 border border-slate-100">
-      <input type="checkbox" name="allowedTeams" value="${esc(t.id)}" ${(user?.allowedTeams||[]).includes(t.id)?'checked':''} class="rounded accent-teal-600">
+      <input type="checkbox" name="allowedTeams" value="${esc(t.id)}" ${(user?.allowedTeams || []).includes(t.id) ? 'checked' : ''} class="rounded accent-teal-600">
       <span class="flex items-center gap-1.5 text-xs"><span class="w-2.5 h-2.5 rounded-full ${t.bg} border ${t.border} inline-block"></span>${esc(t.name)}</span>
     </label>`).join('');
-  document.getElementById('user-modal-title').textContent=isEdit?'사용자 수정':'새 사용자 추가';
-  document.getElementById('user-id-field').value=uid||'';
-  document.getElementById('user-username').value=user?.username||'';
-  document.getElementById('user-username').disabled=isEdit;
-  document.getElementById('user-displayname').value=user?.displayName||'';
-  document.getElementById('user-password').value='';
-  document.getElementById('user-password').placeholder=isEdit?'변경 시에만 입력':'비밀번호 (필수)';
-  document.getElementById('user-role').value=user?.role||'user';
-  document.getElementById('user-is-active').checked=user?.isActive!==false;
-  document.getElementById('user-teams-cb').innerHTML=teamCbs;
-  document.getElementById('user-role').dispatchEvent(new Event('change'));
-  showModal('user-modal');
-};
+      document.getElementById('user-modal-title').textContent = isEdit ? '사용자 수정' : '새 사용자 추가';
+      document.getElementById('user-id-field').value = uid || '';
+      document.getElementById('user-username').value = user?.username || '';
+      document.getElementById('user-username').disabled = isEdit;
+      document.getElementById('user-displayname').value = user?.displayName || '';
+      document.getElementById('user-password').value = '';
+      document.getElementById('user-password').placeholder = isEdit ? '변경 시에만 입력' : '비밀번호 (필수)';
+      document.getElementById('user-role').value = user?.role || 'user';
+      document.getElementById('user-is-active').checked = user?.isActive !== false;
+      document.getElementById('user-teams-cb').innerHTML = teamCbs;
+      document.getElementById('user-role').dispatchEvent(new Event('change'));
+      showModal('user-modal');
+    };
 
-window.confirmDeleteUser = function(uid, username) {
-  if(!confirm(`⚠️ 사용자 [${username}]를 삭제하시겠습니까?\n\n삭제 후 복구할 수 없습니다.`)) return;
-  deleteUser(uid, username).then(()=>{showToast('사용자가 삭제되었습니다.','success');renderUsers();}).catch(e=>showToast(e.message,'error'));
-};
+    window.confirmDeleteUser = function (uid, username) {
+      if (!confirm(`⚠️ 사용자 [${username}]를 삭제하시겠습니까?\n\n삭제 후 복구할 수 없습니다.`)) return;
+      deleteUser(uid, username).then(() => { showToast('사용자가 삭제되었습니다.', 'success'); renderUsers(); }).catch(e => showToast(e.message, 'error'));
+    };
 
-// ========== TEAM MODAL ==========
-window.openTeamModal = function(tid=null) {
-  const team=tid?TEAMS.find(t=>t.id===tid):null;
-  const isEdit=!!team;
-  const colorOpts=COLOR_OPTIONS.map(c=>`<option value="${c.key}" ${team&&team.bg===c.bg?'selected':''}>${c.label}</option>`).join('');
-  document.getElementById('team-modal-title').textContent=isEdit?'활동단 수정':'새 활동단 추가';
-  document.getElementById('team-id-field').value=tid||'';
-  document.getElementById('team-id').value=team?.id||'';
-  document.getElementById('team-id').disabled=isEdit;
-  document.getElementById('team-name').value=team?.name||'';
-  document.getElementById('team-fulltype').value=team?.fullType||'';
-  document.getElementById('team-schedule').value=team?.schedule||'';
-  document.getElementById('team-rooms').value=(team?.typicalRooms||[]).join(', ');
-  document.getElementById('team-color').innerHTML=colorOpts;
-  if(team){
-    const ck=COLOR_OPTIONS.find(c=>c.bg===team.bg);
-    if(ck) document.getElementById('team-color').value=ck.key;
-  }
-  showModal('team-modal');
-};
-
-window.confirmDeleteTeam = function(tid, name) {
-  if(!confirm(`⚠️ 활동단 [${name}]를 삭제하시겠습니까?`)) return;
-  deleteTeam(tid, name).then(()=>{showToast('활동단이 삭제되었습니다.','success');renderTeams();}).catch(e=>showToast(e.message,'error'));
-};
-
-// ========== INIT ==========
-async function initApp() {
-  await initDemoUsers();
-  fetchIP();
-
-  // Session restore
-  const saved=sessionStorage.getItem('ys_session');
-  if(saved){
-    try{ currentUser=JSON.parse(saved); }catch{ sessionStorage.removeItem('ys_session'); }
-  }
-
-  // Check permission
-  if(!currentUser || !isAdminOrSuper()) {
-    showModal('login-modal');
-    updateHeader();
-    return;
-  }
-
-  await loadTeams();
-  updateHeader();
-  setActiveTab('dashboard');
-
-  if(IS_DEMO) document.getElementById('demo-banner')?.classList.remove('hidden');
-  document.getElementById('close-demo-banner')?.addEventListener('click',()=>document.getElementById('demo-banner')?.remove());
-
-  // Tab nav
-  document.querySelectorAll('[data-tab]').forEach(btn=>{
-    btn.addEventListener('click',()=>setActiveTab(btn.dataset.tab));
-  });
-
-  // Logout
-  document.getElementById('logout-btn')?.addEventListener('click', doLogout);
-
-  // Login form
-  document.getElementById('login-form')?.addEventListener('submit', async e=>{
-    e.preventDefault();
-    const un=document.getElementById('login-username').value.trim();
-    const pw=document.getElementById('login-password').value;
-    const errEl=document.getElementById('login-error');
-    const btn=document.getElementById('login-submit-btn');
-    errEl.classList.add('hidden');
-    btn.disabled=true; btn.textContent='로그인 중...';
-    try{
-      const user=await loginUser(un,pw);
-      if(!isAdminOrSuper.call({role:user.role})){
-        errEl.textContent='관리자 권한이 없습니다. 일반 사용자는 index.html을 이용하세요.';
-        errEl.classList.remove('hidden'); btn.disabled=false; btn.textContent='로그인'; return;
+    // ========== TEAM MODAL ==========
+    window.openTeamModal = function (tid = null) {
+      const team = tid ? TEAMS.find(t => t.id === tid) : null;
+      const isEdit = !!team;
+      const colorOpts = COLOR_OPTIONS.map(c => `<option value="${c.key}" ${team && team.bg === c.bg ? 'selected' : ''}>${c.label}</option>`).join('');
+      document.getElementById('team-modal-title').textContent = isEdit ? '활동단 수정' : '새 활동단 추가';
+      document.getElementById('team-id-field').value = tid || '';
+      document.getElementById('team-id').value = team?.id || '';
+      document.getElementById('team-id').disabled = isEdit;
+      document.getElementById('team-name').value = team?.name || '';
+      document.getElementById('team-fulltype').value = team?.fullType || '';
+      document.getElementById('team-schedule').value = team?.schedule || '';
+      document.getElementById('team-rooms').value = (team?.typicalRooms || []).join(', ');
+      document.getElementById('team-color').innerHTML = colorOpts;
+      if (team) {
+        const ck = COLOR_OPTIONS.find(c => c.bg === team.bg);
+        if (ck) document.getElementById('team-color').value = ck.key;
       }
-      currentUser=user; sessionStorage.setItem('ys_session',JSON.stringify(user));
-      hideModal('login-modal');
-      await loadTeams(); updateHeader(); setActiveTab('dashboard');
-      if(IS_DEMO) document.getElementById('demo-banner')?.classList.remove('hidden');
-    }catch(err){ errEl.textContent=err.message; errEl.classList.remove('hidden'); }
-    finally{ btn.disabled=false; btn.textContent='로그인'; }
-  });
+      showModal('team-modal');
+    };
 
-  // User modal form
-  document.getElementById('user-form')?.addEventListener('submit', async e=>{
-    e.preventDefault();
-    const btn=e.target.querySelector('[type=submit]');
-    btn.disabled=true; btn.textContent='저장 중...';
-    try{
-      const uid=document.getElementById('user-id-field').value;
-      const isEdit=!!uid;
-      const username=document.getElementById('user-username').value.trim();
-      const displayName=document.getElementById('user-displayname').value.trim();
-      const password=document.getElementById('user-password').value;
-      const role=document.getElementById('user-role').value;
-      const isActive=document.getElementById('user-is-active').checked;
-      const allowedTeams=Array.from(document.querySelectorAll('[name=allowedTeams]:checked')).map(c=>c.value);
-      if(!displayName||((!isEdit)&&!password)) throw new Error('필수 항목을 모두 입력해주세요.');
-      if(isEdit){
-        const users=await loadUsers(); const old=users.find(u=>u.id===uid);
-        await updateUser(uid,{displayName,password,role,allowedTeams,isActive},old);
-        showToast('사용자가 수정되었습니다.','success');
-      } else {
-        await createUser({username,displayName,password,role,allowedTeams,isActive});
-        showToast('사용자가 추가되었습니다.','success');
+    window.confirmDeleteTeam = function (tid, name) {
+      if (!confirm(`⚠️ 활동단 [${name}]를 삭제하시겠습니까?`)) return;
+      deleteTeam(tid, name).then(() => { showToast('활동단이 삭제되었습니다.', 'success'); renderTeams(); }).catch(e => showToast(e.message, 'error'));
+    };
+
+    // ========== INIT ==========
+    async function initApp() {
+      await initDemoUsers();
+      fetchIP();
+
+      // Session restore
+      const saved = sessionStorage.getItem('ys_session');
+      if (saved) {
+        try { currentUser = JSON.parse(saved); } catch { sessionStorage.removeItem('ys_session'); }
       }
-      hideModal('user-modal'); await renderUsers();
-    }catch(err){showToast(err.message,'error');}
-    finally{btn.disabled=false; btn.textContent='저장';}
-  });
 
-  // Role change → toggle team checkboxes
-  document.getElementById('user-role')?.addEventListener('change', e=>{
-    const tc=document.getElementById('user-teams-section');
-    if(tc) tc.classList.toggle('hidden', e.target.value!=='user');
-  });
+      // Check permission
+      if (!currentUser || !isAdminOrSuper()) {
+        showModal('login-modal');
+        updateHeader();
+        return;
+      }
 
-  // Team modal form
-  document.getElementById('team-form')?.addEventListener('submit', async e=>{
-    e.preventDefault();
-    const btn=e.target.querySelector('[type=submit]');
-    btn.disabled=true; btn.textContent='저장 중...';
-    try{
-      const tid=document.getElementById('team-id-field').value;
-      const isEdit=!!tid;
-      const id=isEdit?tid:document.getElementById('team-id').value.trim();
-      const name=document.getElementById('team-name').value.trim();
-      const fullType=document.getElementById('team-fulltype').value.trim();
-      const schedule=document.getElementById('team-schedule').value.trim();
-      const typicalRooms=document.getElementById('team-rooms').value.split(',').map(s=>s.trim()).filter(Boolean);
-      const colorKey=document.getElementById('team-color').value;
-      const col=COLOR_OPTIONS.find(c=>c.key===colorKey)||COLOR_OPTIONS[0];
-      if(!id||!name) throw new Error('ID와 이름은 필수입니다.');
-      const data={id,name,fullType,schedule,typicalRooms,bg:col.bg,text:col.text,border:col.border};
-      if(isEdit){ const old=TEAMS.find(t=>t.id===tid); await updateTeam(tid,data,old); showToast('활동단이 수정되었습니다.','success'); }
-      else{ await createTeam(data); showToast('활동단이 추가되었습니다.','success'); }
-      hideModal('team-modal'); renderTeams();
-    }catch(err){showToast(err.message,'error');}
-    finally{btn.disabled=false; btn.textContent='저장';}
-  });
+      await loadTeams();
+      updateHeader();
+      setActiveTab('dashboard');
 
-  // Close modals
-  document.getElementById('close-user-modal')?.addEventListener('click',()=>hideModal('user-modal'));
-  document.getElementById('close-team-modal')?.addEventListener('click',()=>hideModal('team-modal'));
-}
+      if (IS_DEMO) document.getElementById('demo-banner')?.classList.remove('hidden');
+      document.getElementById('close-demo-banner')?.addEventListener('click', () => document.getElementById('demo-banner')?.remove());
 
-function updateHeader() {
-  const el=document.getElementById('header-user');
-  if(!el) return;
-  if(!currentUser){ el.innerHTML=''; return; }
-  const roleLabel={superadmin:'👑 주관리자',admin:'🔧 관리자',user:'👤'}[currentUser.role]||'';
-  el.innerHTML=`<div class="flex items-center gap-2">
+      // Tab nav
+      document.querySelectorAll('[data-tab]').forEach(btn => {
+        btn.addEventListener('click', () => setActiveTab(btn.dataset.tab));
+      });
+
+      // Logout
+      document.getElementById('logout-btn')?.addEventListener('click', doLogout);
+
+      // Login form
+      document.getElementById('login-form')?.addEventListener('submit', async e => {
+        e.preventDefault();
+        const un = document.getElementById('login-username').value.trim();
+        const pw = document.getElementById('login-password').value;
+        const errEl = document.getElementById('login-error');
+        const btn = document.getElementById('login-submit-btn');
+        errEl.classList.add('hidden');
+        btn.disabled = true; btn.textContent = '로그인 중...';
+        try {
+          const user = await loginUser(un, pw);
+          if (!isAdminOrSuper.call({ role: user.role })) {
+            errEl.textContent = '관리자 권한이 없습니다. 일반 사용자는 index.html을 이용하세요.';
+            errEl.classList.remove('hidden'); btn.disabled = false; btn.textContent = '로그인'; return;
+          }
+          currentUser = user; sessionStorage.setItem('ys_session', JSON.stringify(user));
+          hideModal('login-modal');
+          await loadTeams(); updateHeader(); setActiveTab('dashboard');
+          if (IS_DEMO) document.getElementById('demo-banner')?.classList.remove('hidden');
+        } catch (err) { errEl.textContent = err.message; errEl.classList.remove('hidden'); }
+        finally { btn.disabled = false; btn.textContent = '로그인'; }
+      });
+
+      // User modal form
+      document.getElementById('user-form')?.addEventListener('submit', async e => {
+        e.preventDefault();
+        const btn = e.target.querySelector('[type=submit]');
+        btn.disabled = true; btn.textContent = '저장 중...';
+        try {
+          const uid = document.getElementById('user-id-field').value;
+          const isEdit = !!uid;
+          const username = document.getElementById('user-username').value.trim();
+          const displayName = document.getElementById('user-displayname').value.trim();
+          const password = document.getElementById('user-password').value;
+          const role = document.getElementById('user-role').value;
+          const isActive = document.getElementById('user-is-active').checked;
+          const allowedTeams = Array.from(document.querySelectorAll('[name=allowedTeams]:checked')).map(c => c.value);
+          if (!displayName || ((!isEdit) && !password)) throw new Error('필수 항목을 모두 입력해주세요.');
+          if (isEdit) {
+            const users = await loadUsers(); const old = users.find(u => u.id === uid);
+            await updateUser(uid, { displayName, password, role, allowedTeams, isActive }, old);
+            showToast('사용자가 수정되었습니다.', 'success');
+          } else {
+            await createUser({ username, displayName, password, role, allowedTeams, isActive });
+            showToast('사용자가 추가되었습니다.', 'success');
+          }
+          hideModal('user-modal'); await renderUsers();
+        } catch (err) { showToast(err.message, 'error'); }
+        finally { btn.disabled = false; btn.textContent = '저장'; }
+      });
+
+      // Role change → toggle team checkboxes
+      document.getElementById('user-role')?.addEventListener('change', e => {
+        const tc = document.getElementById('user-teams-section');
+        if (tc) tc.classList.toggle('hidden', e.target.value !== 'user');
+      });
+
+      // Team modal form
+      document.getElementById('team-form')?.addEventListener('submit', async e => {
+        e.preventDefault();
+        const btn = e.target.querySelector('[type=submit]');
+        btn.disabled = true; btn.textContent = '저장 중...';
+        try {
+          const tid = document.getElementById('team-id-field').value;
+          const isEdit = !!tid;
+          const id = isEdit ? tid : document.getElementById('team-id').value.trim();
+          const name = document.getElementById('team-name').value.trim();
+          const fullType = document.getElementById('team-fulltype').value.trim();
+          const schedule = document.getElementById('team-schedule').value.trim();
+          const typicalRooms = document.getElementById('team-rooms').value.split(',').map(s => s.trim()).filter(Boolean);
+          const colorKey = document.getElementById('team-color').value;
+          const col = COLOR_OPTIONS.find(c => c.key === colorKey) || COLOR_OPTIONS[0];
+          if (!id || !name) throw new Error('ID와 이름은 필수입니다.');
+          const data = { id, name, fullType, schedule, typicalRooms, bg: col.bg, text: col.text, border: col.border };
+          if (isEdit) { const old = TEAMS.find(t => t.id === tid); await updateTeam(tid, data, old); showToast('활동단이 수정되었습니다.', 'success'); }
+          else { await createTeam(data); showToast('활동단이 추가되었습니다.', 'success'); }
+          hideModal('team-modal'); renderTeams();
+        } catch (err) { showToast(err.message, 'error'); }
+        finally { btn.disabled = false; btn.textContent = '저장'; }
+      });
+
+      // Close modals
+      document.getElementById('close-user-modal')?.addEventListener('click', () => hideModal('user-modal'));
+      document.getElementById('close-team-modal')?.addEventListener('click', () => hideModal('team-modal'));
+    }
+
+    function updateHeader() {
+      const el = document.getElementById('header-user');
+      if (!el) return;
+      if (!currentUser) { el.innerHTML = ''; return; }
+      const roleLabel = { superadmin: '👑 주관리자', admin: '🔧 관리자', user: '👤' }[currentUser.role] || '';
+      el.innerHTML = `<div class="flex items-center gap-2">
     <div class="text-right hidden sm:block"><div class="text-xs font-bold text-slate-700">${esc(currentUser.displayName)}</div><div class="text-[10px] text-slate-400">${roleLabel}</div></div>
     <div class="bg-gradient-to-br from-teal-400 to-teal-600 text-white rounded-full w-8 h-8 flex items-center justify-center text-sm font-bold">${esc(currentUser.displayName[0])}</div>
     <button id="logout-btn" class="ml-1 text-slate-400 hover:text-red-500 transition-colors p-1.5 rounded-lg hover:bg-red-50"><i data-lucide="log-out" class="w-4 h-4"></i></button>
   </div>`;
-  document.getElementById('logout-btn')?.addEventListener('click', doLogout);
-  lucide.createIcons();
-}
+      document.getElementById('logout-btn')?.addEventListener('click', doLogout);
+      lucide.createIcons();
+    }
 
-// Helper for isAdminOrSuper check in login
-function isAdminOrSuperForRole(role){ return role==='admin'||role==='superadmin'; }
+    // Helper for isAdminOrSuper check in login
+    function isAdminOrSuperForRole(role) { return role === 'admin' || role === 'superadmin'; }
 
-window.addEventListener('DOMContentLoaded', initApp);
-</script>
+    window.addEventListener('DOMContentLoaded', initApp);
+  </script>
 
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@400;500;600;700;800&display=swap');
-*{box-sizing:border-box;}
-body{font-family:'Pretendard','Apple SD Gothic Neo',sans-serif;}
-@keyframes spin{to{transform:rotate(360deg);}}
-.animate-spin{animation:spin 1s linear infinite;}
-::-webkit-scrollbar{width:4px;height:4px;}
-::-webkit-scrollbar-track{background:#f1f5f9;}
-::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:10px;}
-</style>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@400;500;600;700;800&display=swap');
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Pretendard', 'Apple SD Gothic Neo', sans-serif;
+    }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    .animate-spin {
+      animation: spin 1s linear infinite;
+    }
+
+    ::-webkit-scrollbar {
+      width: 4px;
+      height: 4px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: #f1f5f9;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 10px;
+    }
+  </style>
 </head>
+
 <body class="bg-slate-100 min-h-screen flex flex-col">
 
-<!-- Demo Banner -->
-<div id="demo-banner" class="hidden bg-gradient-to-r from-amber-500 to-orange-500 text-white px-4 py-2 text-center text-xs font-semibold relative">
-  ⚠️ 데모 모드 — 데이터가 저장되지 않습니다.
-  &nbsp;|&nbsp; 테스트 계정: <code class="bg-white/20 px-1.5 py-0.5 rounded">admin / youthnaroo2026!</code>
-  <button id="close-demo-banner" class="absolute right-3 top-1/2 -translate-y-1/2 hover:opacity-70">✕</button>
-</div>
-
-<!-- Header -->
-<header class="bg-slate-900 text-white px-5 py-3 shadow-xl flex-shrink-0">
-  <div class="max-w-[1600px] mx-auto flex items-center justify-between gap-4">
-    <div class="flex items-center gap-3">
-      <div class="bg-teal-500 p-2 rounded-xl"><i data-lucide="shield" class="w-5 h-5"></i></div>
-      <div>
-        <h1 class="text-sm font-black tracking-tight">유스나루 관리자 페이지</h1>
-        <p class="text-[10px] text-slate-400">Admin Panel v2.0</p>
-      </div>
-    </div>
-    <div class="flex items-center gap-3">
-      <a href="index.html" class="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white transition-colors border border-slate-700 hover:border-slate-500 px-3 py-1.5 rounded-lg">
-        <i data-lucide="arrow-left" class="w-3.5 h-3.5"></i> 예약표
-      </a>
-      <div id="header-user"></div>
-    </div>
-  </div>
-</header>
-
-<!-- Layout -->
-<div class="flex flex-grow max-w-[1600px] w-full mx-auto p-4 gap-4">
-
-  <!-- Sidebar -->
-  <aside class="w-56 flex-shrink-0 hidden md:block">
-    <nav class="bg-slate-900 rounded-2xl p-2 shadow-xl sticky top-4 space-y-1">
-      <p class="text-[9px] font-bold text-slate-500 uppercase tracking-widest px-3 pt-2 pb-1">메뉴</p>
-      <button data-tab="dashboard" class="w-full text-left flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold text-slate-400 hover:bg-slate-700 hover:text-white transition-all">
-        <i data-lucide="layout-dashboard" class="w-4 h-4 flex-shrink-0"></i> 대시보드
-      </button>
-      <button data-tab="users" class="w-full text-left flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold text-slate-400 hover:bg-slate-700 hover:text-white transition-all">
-        <i data-lucide="users" class="w-4 h-4 flex-shrink-0"></i> 사용자 관리
-      </button>
-      <button data-tab="teams" class="w-full text-left flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold text-slate-400 hover:bg-slate-700 hover:text-white transition-all">
-        <i data-lucide="flag" class="w-4 h-4 flex-shrink-0"></i> 활동단 관리
-      </button>
-      <div class="border-t border-slate-800 my-2"></div>
-      <p class="text-[9px] font-bold text-slate-500 uppercase tracking-widest px-3 pb-1">로그</p>
-      <button data-tab="login-logs" class="w-full text-left flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold text-slate-400 hover:bg-slate-700 hover:text-white transition-all">
-        <i data-lucide="log-in" class="w-4 h-4 flex-shrink-0"></i> 로그인 로그
-      </button>
-      <button data-tab="activity-logs" class="w-full text-left flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold text-slate-400 hover:bg-slate-700 hover:text-white transition-all">
-        <i data-lucide="activity" class="w-4 h-4 flex-shrink-0"></i> 활동 로그
-      </button>
-      <div class="border-t border-slate-800 my-2"></div>
-      <button data-tab="archive" class="w-full text-left flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold text-slate-400 hover:bg-slate-700 hover:text-white transition-all">
-        <i data-lucide="history" class="w-4 h-4 flex-shrink-0"></i> 과거 기록
-      </button>
-    </nav>
-  </aside>
-
-  <!-- Mobile Tab Bar -->
-  <div class="md:hidden w-full fixed bottom-0 left-0 right-0 z-40 bg-slate-900 border-t border-slate-800 flex">
-    <button data-tab="dashboard" class="flex-1 flex flex-col items-center gap-1 py-2 text-slate-400 text-[9px] font-bold"><i data-lucide="layout-dashboard" class="w-4 h-4"></i>대시보드</button>
-    <button data-tab="users" class="flex-1 flex flex-col items-center gap-1 py-2 text-slate-400 text-[9px] font-bold"><i data-lucide="users" class="w-4 h-4"></i>사용자</button>
-    <button data-tab="teams" class="flex-1 flex flex-col items-center gap-1 py-2 text-slate-400 text-[9px] font-bold"><i data-lucide="flag" class="w-4 h-4"></i>활동단</button>
-    <button data-tab="login-logs" class="flex-1 flex flex-col items-center gap-1 py-2 text-slate-400 text-[9px] font-bold"><i data-lucide="log-in" class="w-4 h-4"></i>로그인</button>
-    <button data-tab="activity-logs" class="flex-1 flex flex-col items-center gap-1 py-2 text-slate-400 text-[9px] font-bold"><i data-lucide="activity" class="w-4 h-4"></i>활동</button>
-    <button data-tab="archive" class="flex-1 flex flex-col items-center gap-1 py-2 text-slate-400 text-[9px] font-bold"><i data-lucide="history" class="w-4 h-4"></i>과거</button>
+  <!-- Demo Banner -->
+  <div id="demo-banner"
+    class="hidden bg-gradient-to-r from-amber-500 to-orange-500 text-white px-4 py-2 text-center text-xs font-semibold relative">
+    ⚠️ 데모 모드 — 데이터가 저장되지 않습니다.
+    &nbsp;|&nbsp; 테스트 계정: <code class="bg-white/20 px-1.5 py-0.5 rounded">admin / youthnaroo2026!</code>
+    <button id="close-demo-banner" class="absolute right-3 top-1/2 -translate-y-1/2 hover:opacity-70">✕</button>
   </div>
 
-  <!-- Main Content -->
-  <main class="flex-grow min-w-0 pb-20 md:pb-0">
-    <div data-panel="dashboard" id="panel-dashboard"></div>
-    <div data-panel="users" id="panel-users" class="hidden"></div>
-    <div data-panel="teams" id="panel-teams" class="hidden"></div>
-    <div data-panel="login-logs" id="panel-login-logs" class="hidden"></div>
-    <div data-panel="activity-logs" id="panel-activity-logs" class="hidden"></div>
-    <div data-panel="archive" id="panel-archive" class="hidden"></div>
-  </main>
-</div>
-
-<!-- Toast -->
-<div id="toast" class="fixed bottom-20 md:bottom-6 left-1/2 z-[200] flex items-center gap-2 bg-emerald-600 text-white px-5 py-3 rounded-2xl shadow-2xl text-sm font-semibold pointer-events-none" style="opacity:0;transform:translateX(-50%) translateY(16px);transition:all .3s">
-  <i data-lucide="check-circle" class="w-4 h-4"></i>
-  <span id="toast-msg">알림</span>
-</div>
-
-<!-- ===== LOGIN MODAL ===== -->
-<div id="login-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm border border-slate-200 overflow-hidden">
-    <div class="bg-gradient-to-br from-slate-800 to-slate-900 p-6 text-white">
+  <!-- Header -->
+  <header class="bg-slate-900 text-white px-5 py-3 shadow-xl flex-shrink-0">
+    <div class="max-w-[1600px] mx-auto flex items-center justify-between gap-4">
       <div class="flex items-center gap-3">
-        <div class="bg-teal-500/20 p-2 rounded-xl border border-teal-500/30"><i data-lucide="shield" class="w-5 h-5 text-teal-400"></i></div>
+        <div class="bg-teal-500 p-2 rounded-xl"><i data-lucide="shield" class="w-5 h-5"></i></div>
         <div>
-          <h2 class="text-base font-bold">관리자 로그인</h2>
-          <p class="text-xs text-slate-400">관리자 계정으로 로그인하세요</p>
+          <h1 class="text-sm font-black tracking-tight">유스나루 관리자 페이지</h1>
+          <p class="text-[10px] text-slate-400">Admin Panel v2.0</p>
         </div>
       </div>
+      <div class="flex items-center gap-3">
+        <a href="index.html"
+          class="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white transition-colors border border-slate-700 hover:border-slate-500 px-3 py-1.5 rounded-lg">
+          <i data-lucide="arrow-left" class="w-3.5 h-3.5"></i> 예약표
+        </a>
+        <div id="header-user"></div>
+      </div>
     </div>
-    <div class="p-6">
-      <form id="login-form" class="flex flex-col gap-4">
-        <div>
-          <label class="block text-xs font-semibold text-slate-600 mb-1.5">아이디</label>
-          <input id="login-username" type="text" placeholder="아이디" required autocomplete="username"
-            class="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400 placeholder-slate-300">
+  </header>
+
+  <!-- Layout -->
+  <div class="flex flex-grow max-w-[1600px] w-full mx-auto p-4 gap-4">
+
+    <!-- Sidebar -->
+    <aside class="w-56 flex-shrink-0 hidden md:block">
+      <nav class="bg-slate-900 rounded-2xl p-2 shadow-xl sticky top-4 space-y-1">
+        <p class="text-[9px] font-bold text-slate-500 uppercase tracking-widest px-3 pt-2 pb-1">메뉴</p>
+        <button data-tab="dashboard"
+          class="w-full text-left flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold text-slate-400 hover:bg-slate-700 hover:text-white transition-all">
+          <i data-lucide="layout-dashboard" class="w-4 h-4 flex-shrink-0"></i> 대시보드
+        </button>
+        <button data-tab="users"
+          class="w-full text-left flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold text-slate-400 hover:bg-slate-700 hover:text-white transition-all">
+          <i data-lucide="users" class="w-4 h-4 flex-shrink-0"></i> 사용자 관리
+        </button>
+        <button data-tab="teams"
+          class="w-full text-left flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold text-slate-400 hover:bg-slate-700 hover:text-white transition-all">
+          <i data-lucide="flag" class="w-4 h-4 flex-shrink-0"></i> 활동단 관리
+        </button>
+        <div class="border-t border-slate-800 my-2"></div>
+        <p class="text-[9px] font-bold text-slate-500 uppercase tracking-widest px-3 pb-1">로그</p>
+        <button data-tab="login-logs"
+          class="w-full text-left flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold text-slate-400 hover:bg-slate-700 hover:text-white transition-all">
+          <i data-lucide="log-in" class="w-4 h-4 flex-shrink-0"></i> 로그인 로그
+        </button>
+        <button data-tab="activity-logs"
+          class="w-full text-left flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold text-slate-400 hover:bg-slate-700 hover:text-white transition-all">
+          <i data-lucide="activity" class="w-4 h-4 flex-shrink-0"></i> 활동 로그
+        </button>
+        <div class="border-t border-slate-800 my-2"></div>
+        <button data-tab="archive"
+          class="w-full text-left flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold text-slate-400 hover:bg-slate-700 hover:text-white transition-all">
+          <i data-lucide="history" class="w-4 h-4 flex-shrink-0"></i> 과거 기록
+        </button>
+      </nav>
+    </aside>
+
+    <!-- Mobile Tab Bar -->
+    <div class="md:hidden w-full fixed bottom-0 left-0 right-0 z-40 bg-slate-900 border-t border-slate-800 flex">
+      <button data-tab="dashboard"
+        class="flex-1 flex flex-col items-center gap-1 py-2 text-slate-400 text-[9px] font-bold"><i
+          data-lucide="layout-dashboard" class="w-4 h-4"></i>대시보드</button>
+      <button data-tab="users"
+        class="flex-1 flex flex-col items-center gap-1 py-2 text-slate-400 text-[9px] font-bold"><i data-lucide="users"
+          class="w-4 h-4"></i>사용자</button>
+      <button data-tab="teams"
+        class="flex-1 flex flex-col items-center gap-1 py-2 text-slate-400 text-[9px] font-bold"><i data-lucide="flag"
+          class="w-4 h-4"></i>활동단</button>
+      <button data-tab="login-logs"
+        class="flex-1 flex flex-col items-center gap-1 py-2 text-slate-400 text-[9px] font-bold"><i data-lucide="log-in"
+          class="w-4 h-4"></i>로그인</button>
+      <button data-tab="activity-logs"
+        class="flex-1 flex flex-col items-center gap-1 py-2 text-slate-400 text-[9px] font-bold"><i
+          data-lucide="activity" class="w-4 h-4"></i>활동</button>
+      <button data-tab="archive"
+        class="flex-1 flex flex-col items-center gap-1 py-2 text-slate-400 text-[9px] font-bold"><i
+          data-lucide="history" class="w-4 h-4"></i>과거</button>
+    </div>
+
+    <!-- Main Content -->
+    <main class="flex-grow min-w-0 pb-20 md:pb-0">
+      <div data-panel="dashboard" id="panel-dashboard"></div>
+      <div data-panel="users" id="panel-users" class="hidden"></div>
+      <div data-panel="teams" id="panel-teams" class="hidden"></div>
+      <div data-panel="login-logs" id="panel-login-logs" class="hidden"></div>
+      <div data-panel="activity-logs" id="panel-activity-logs" class="hidden"></div>
+      <div data-panel="archive" id="panel-archive" class="hidden"></div>
+    </main>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast"
+    class="fixed bottom-20 md:bottom-6 left-1/2 z-[200] flex items-center gap-2 bg-emerald-600 text-white px-5 py-3 rounded-2xl shadow-2xl text-sm font-semibold pointer-events-none"
+    style="opacity:0;transform:translateX(-50%) translateY(16px);transition:all .3s">
+    <i data-lucide="check-circle" class="w-4 h-4"></i>
+    <span id="toast-msg">알림</span>
+  </div>
+
+  <!-- ===== LOGIN MODAL ===== -->
+  <div id="login-modal"
+    class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm border border-slate-200 overflow-hidden">
+      <div class="bg-gradient-to-br from-slate-800 to-slate-900 p-6 text-white">
+        <div class="flex items-center gap-3">
+          <div class="bg-teal-500/20 p-2 rounded-xl border border-teal-500/30"><i data-lucide="shield"
+              class="w-5 h-5 text-teal-400"></i></div>
+          <div>
+            <h2 class="text-base font-bold">관리자 로그인</h2>
+            <p class="text-xs text-slate-400">관리자 계정으로 로그인하세요</p>
+          </div>
+        </div>
+      </div>
+      <div class="p-6">
+        <form id="login-form" class="flex flex-col gap-4">
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1.5">아이디</label>
+            <input id="login-username" type="text" placeholder="아이디" required autocomplete="username"
+              class="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400 placeholder-slate-300">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1.5">비밀번호</label>
+            <input id="login-password" type="password" placeholder="비밀번호" required autocomplete="current-password"
+              class="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400 placeholder-slate-300">
+          </div>
+          <div id="login-error"
+            class="hidden bg-red-50 border border-red-200 text-red-600 text-xs px-3 py-2 rounded-xl"></div>
+          <div class="bg-slate-50 border border-slate-100 rounded-xl p-3 text-[10px] text-slate-500">
+            <p class="font-semibold mb-1 text-slate-600">데모 계정</p>
+            <p><code class="bg-slate-200 px-1 rounded">admin / youthnaroo2026!</code> (주관리자)</p>
+            <p class="mt-0.5"><code class="bg-slate-200 px-1 rounded">manager1 / mgr123</code> (관리자)</p>
+          </div>
+          <button id="login-submit-btn" type="submit"
+            class="w-full bg-gradient-to-r from-slate-700 to-slate-800 hover:from-slate-800 hover:to-slate-900 text-white font-bold py-3 rounded-xl transition-all text-sm">
+            로그인
+          </button>
+          <a href="index.html" class="text-center text-xs text-slate-400 hover:text-teal-600 transition-colors">← 일반 예약
+            페이지로</a>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== USER MODAL ===== -->
+  <div id="user-modal"
+    class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md border border-slate-200 max-h-[90vh] overflow-y-auto">
+      <div class="flex items-center justify-between p-5 border-b border-slate-100">
+        <div class="flex items-center gap-3">
+          <div class="bg-teal-100 text-teal-600 p-2 rounded-xl"><i data-lucide="user-plus" class="w-4 h-4"></i></div>
+          <h2 id="user-modal-title" class="font-bold text-slate-800">사용자 추가</h2>
+        </div>
+        <button id="close-user-modal" class="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+      <form id="user-form" class="p-5 flex flex-col gap-4">
+        <input type="hidden" id="user-id-field">
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1.5">아이디 <span
+                class="text-red-400">*</span></label>
+            <input id="user-username" type="text" required placeholder="영문/숫자"
+              class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400 placeholder-slate-300 disabled:bg-slate-50 disabled:text-slate-400">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1.5">이름 <span
+                class="text-red-400">*</span></label>
+            <input id="user-displayname" type="text" required placeholder="표시 이름"
+              class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400 placeholder-slate-300">
+          </div>
         </div>
         <div>
           <label class="block text-xs font-semibold text-slate-600 mb-1.5">비밀번호</label>
-          <input id="login-password" type="password" placeholder="비밀번호" required autocomplete="current-password"
-            class="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400 placeholder-slate-300">
+          <input id="user-password" type="password" placeholder="비밀번호"
+            class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400 placeholder-slate-300">
         </div>
-        <div id="login-error" class="hidden bg-red-50 border border-red-200 text-red-600 text-xs px-3 py-2 rounded-xl"></div>
-        <div class="bg-slate-50 border border-slate-100 rounded-xl p-3 text-[10px] text-slate-500">
-          <p class="font-semibold mb-1 text-slate-600">데모 계정</p>
-          <p><code class="bg-slate-200 px-1 rounded">admin / youthnaroo2026!</code> (주관리자)</p>
-          <p class="mt-0.5"><code class="bg-slate-200 px-1 rounded">manager1 / mgr123</code> (관리자)</p>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1.5">역할</label>
+            <select id="user-role"
+              class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400 bg-white">
+              <option value="user">👤 일반사용자</option>
+              <option value="admin">🔧 관리자</option>
+              <option value="superadmin" id="superadmin-opt">👑 주관리자</option>
+            </select>
+          </div>
+          <div class="flex items-end pb-2">
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input id="user-is-active" type="checkbox" checked class="rounded accent-teal-600 w-4 h-4">
+              <span class="text-sm font-semibold text-slate-700">활성 계정</span>
+            </label>
+          </div>
         </div>
-        <button id="login-submit-btn" type="submit"
-          class="w-full bg-gradient-to-r from-slate-700 to-slate-800 hover:from-slate-800 hover:to-slate-900 text-white font-bold py-3 rounded-xl transition-all text-sm">
-          로그인
-        </button>
-        <a href="index.html" class="text-center text-xs text-slate-400 hover:text-teal-600 transition-colors">← 일반 예약 페이지로</a>
+        <div id="user-teams-section">
+          <label class="block text-xs font-semibold text-slate-600 mb-2">활동단 권한 <span
+              class="text-slate-400 font-normal">(일반사용자 한정)</span></label>
+          <div id="user-teams-cb"
+            class="grid grid-cols-2 gap-1 max-h-48 overflow-y-auto p-1 border border-slate-100 rounded-xl bg-slate-50">
+          </div>
+        </div>
+        <button type="submit"
+          class="w-full bg-teal-600 hover:bg-teal-700 text-white font-bold py-2.5 rounded-xl transition-all text-sm shadow-sm">저장</button>
       </form>
     </div>
   </div>
-</div>
 
-<!-- ===== USER MODAL ===== -->
-<div id="user-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md border border-slate-200 max-h-[90vh] overflow-y-auto">
-    <div class="flex items-center justify-between p-5 border-b border-slate-100">
-      <div class="flex items-center gap-3">
-        <div class="bg-teal-100 text-teal-600 p-2 rounded-xl"><i data-lucide="user-plus" class="w-4 h-4"></i></div>
-        <h2 id="user-modal-title" class="font-bold text-slate-800">사용자 추가</h2>
+  <!-- ===== TEAM MODAL ===== -->
+  <div id="team-modal"
+    class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md border border-slate-200">
+      <div class="flex items-center justify-between p-5 border-b border-slate-100">
+        <div class="flex items-center gap-3">
+          <div class="bg-indigo-100 text-indigo-600 p-2 rounded-xl"><i data-lucide="flag" class="w-4 h-4"></i></div>
+          <h2 id="team-modal-title" class="font-bold text-slate-800">활동단 추가</h2>
+        </div>
+        <button id="close-team-modal" class="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
       </div>
-      <button id="close-user-modal" class="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100">
-        <i data-lucide="x" class="w-5 h-5"></i>
-      </button>
+      <form id="team-form" class="p-5 flex flex-col gap-3">
+        <input type="hidden" id="team-id-field">
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1.5">ID <span
+                class="text-red-400">*</span></label>
+            <input id="team-id" type="text" required placeholder="영문 소문자"
+              class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-400 placeholder-slate-300 disabled:bg-slate-50 disabled:text-slate-400">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1.5">활동단명 <span
+                class="text-red-400">*</span></label>
+            <input id="team-name" type="text" required placeholder="이름"
+              class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-400 placeholder-slate-300">
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1.5">정식명칭</label>
+          <input id="team-fulltype" type="text" placeholder="예: 청소년운영위원회"
+            class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-400 placeholder-slate-300">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1.5">정기 일정</label>
+          <input id="team-schedule" type="text" placeholder="예: 2,4주 토요일 14:00~17:00"
+            class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-400 placeholder-slate-300">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1.5">주요 공간 <span
+              class="text-slate-400 font-normal">(쉼표 구분)</span></label>
+          <input id="team-rooms" type="text" placeholder="예: 나루지기실, 링키실"
+            class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-400 placeholder-slate-300">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1.5">색상</label>
+          <select id="team-color"
+            class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white"></select>
+        </div>
+        <button type="submit"
+          class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 rounded-xl transition-all text-sm shadow-sm mt-1">저장</button>
+      </form>
     </div>
-    <form id="user-form" class="p-5 flex flex-col gap-4">
-      <input type="hidden" id="user-id-field">
-      <div class="grid grid-cols-2 gap-3">
-        <div>
-          <label class="block text-xs font-semibold text-slate-600 mb-1.5">아이디 <span class="text-red-400">*</span></label>
-          <input id="user-username" type="text" required placeholder="영문/숫자"
-            class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400 placeholder-slate-300 disabled:bg-slate-50 disabled:text-slate-400">
-        </div>
-        <div>
-          <label class="block text-xs font-semibold text-slate-600 mb-1.5">이름 <span class="text-red-400">*</span></label>
-          <input id="user-displayname" type="text" required placeholder="표시 이름"
-            class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400 placeholder-slate-300">
-        </div>
-      </div>
-      <div>
-        <label class="block text-xs font-semibold text-slate-600 mb-1.5">비밀번호</label>
-        <input id="user-password" type="password" placeholder="비밀번호"
-          class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400 placeholder-slate-300">
-      </div>
-      <div class="grid grid-cols-2 gap-3">
-        <div>
-          <label class="block text-xs font-semibold text-slate-600 mb-1.5">역할</label>
-          <select id="user-role" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400 bg-white">
-            <option value="user">👤 일반사용자</option>
-            <option value="admin">🔧 관리자</option>
-            <option value="superadmin" id="superadmin-opt">👑 주관리자</option>
-          </select>
-        </div>
-        <div class="flex items-end pb-2">
-          <label class="flex items-center gap-2 cursor-pointer">
-            <input id="user-is-active" type="checkbox" checked class="rounded accent-teal-600 w-4 h-4">
-            <span class="text-sm font-semibold text-slate-700">활성 계정</span>
-          </label>
-        </div>
-      </div>
-      <div id="user-teams-section">
-        <label class="block text-xs font-semibold text-slate-600 mb-2">활동단 권한 <span class="text-slate-400 font-normal">(일반사용자 한정)</span></label>
-        <div id="user-teams-cb" class="grid grid-cols-2 gap-1 max-h-48 overflow-y-auto p-1 border border-slate-100 rounded-xl bg-slate-50"></div>
-      </div>
-      <button type="submit" class="w-full bg-teal-600 hover:bg-teal-700 text-white font-bold py-2.5 rounded-xl transition-all text-sm shadow-sm">저장</button>
-    </form>
   </div>
-</div>
-
-<!-- ===== TEAM MODAL ===== -->
-<div id="team-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md border border-slate-200">
-    <div class="flex items-center justify-between p-5 border-b border-slate-100">
-      <div class="flex items-center gap-3">
-        <div class="bg-indigo-100 text-indigo-600 p-2 rounded-xl"><i data-lucide="flag" class="w-4 h-4"></i></div>
-        <h2 id="team-modal-title" class="font-bold text-slate-800">활동단 추가</h2>
-      </div>
-      <button id="close-team-modal" class="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100">
-        <i data-lucide="x" class="w-5 h-5"></i>
-      </button>
-    </div>
-    <form id="team-form" class="p-5 flex flex-col gap-3">
-      <input type="hidden" id="team-id-field">
-      <div class="grid grid-cols-2 gap-3">
-        <div>
-          <label class="block text-xs font-semibold text-slate-600 mb-1.5">ID <span class="text-red-400">*</span></label>
-          <input id="team-id" type="text" required placeholder="영문 소문자" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-400 placeholder-slate-300 disabled:bg-slate-50 disabled:text-slate-400">
-        </div>
-        <div>
-          <label class="block text-xs font-semibold text-slate-600 mb-1.5">활동단명 <span class="text-red-400">*</span></label>
-          <input id="team-name" type="text" required placeholder="이름" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-400 placeholder-slate-300">
-        </div>
-      </div>
-      <div>
-        <label class="block text-xs font-semibold text-slate-600 mb-1.5">정식명칭</label>
-        <input id="team-fulltype" type="text" placeholder="예: 청소년운영위원회" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-400 placeholder-slate-300">
-      </div>
-      <div>
-        <label class="block text-xs font-semibold text-slate-600 mb-1.5">정기 일정</label>
-        <input id="team-schedule" type="text" placeholder="예: 2,4주 토요일 14:00~17:00" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-400 placeholder-slate-300">
-      </div>
-      <div>
-        <label class="block text-xs font-semibold text-slate-600 mb-1.5">주요 공간 <span class="text-slate-400 font-normal">(쉼표 구분)</span></label>
-        <input id="team-rooms" type="text" placeholder="예: 나루지기실, 링키실" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-400 placeholder-slate-300">
-      </div>
-      <div>
-        <label class="block text-xs font-semibold text-slate-600 mb-1.5">색상</label>
-        <select id="team-color" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white"></select>
-      </div>
-      <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 rounded-xl transition-all text-sm shadow-sm mt-1">저장</button>
-    </form>
-  </div>
-</div>
 
 </body>
+
 </html>
