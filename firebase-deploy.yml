@@ -1,0 +1,26 @@
+name: Deploy to Firebase Hosting on Push
+
+on:
+  push:
+    branches:
+      - main  # 👈 만약 본인의 메인 브랜치 이름이 master라면 master로 수정해 주세요.
+
+jobs:
+  build_and_deploy:
+    runs-on: ubuntu-latest
+    steps:
+      # 1. GitHub 서버로 내 소스코드 가져오기
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 2. 순수 HTML 배포 전용 설정으로 Firebase 업로드
+      - name: Deploy to Firebase Hosting
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: '${{ secrets.GITHUB_TOKEN }}'
+          firebaseServiceAccount: '' # 공란 유지 (아래 토큰 사용)
+          projectId: youthnarooschedule # 👈 내 Firebase 프로젝트 ID
+          entryPoint: "."             # ⚠️ [핵심] npx 검사를 건너뛰고 현재 폴더를 바로 배포하라는 명령
+          hostingChannelId: live      # ⚠️ [핵심] 프리뷰 채널을 거치지 않고 실시간 사이트에 바로 반영하라는 명령
+        env:
+          FIREBASE_CLI_TOKEN: ${{ secrets.FIREBASE_TOKEN }} # 👈 우리가 등록한 비밀 열쇠
