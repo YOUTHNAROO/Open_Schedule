@@ -1,0 +1,1277 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>유스나루 활동단 공간 예약 시스템</title>
+    <meta name="description" content="서울시립마포청소년센터 유스나루 활동단별 활동실 실시간 예약 시스템 v2">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+        import {
+            getFirestore, collection, doc, setDoc, getDoc, getDocs, deleteDoc,
+            onSnapshot, query, orderBy, runTransaction, serverTimestamp,
+            writeBatch, where, limit, addDoc
+        } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+        // ==================== FIREBASE CONFIG ====================
+        // For Firebase JS SDK v7.20.0 and later, measurementId is optional
+        const firebaseConfig = {
+            apiKey: "AIzaSyA1XuuCYE2RnipFHQ0d9dCjGNlPtgwvWmw",
+            authDomain: "youthnarooschedule.firebaseapp.com",
+            databaseURL: "https://youthnarooschedule-default-rtdb.firebaseio.com",
+            projectId: "youthnarooschedule",
+            storageBucket: "youthnarooschedule.firebasestorage.app",
+            messagingSenderId: "53441811066",
+            appId: "1:53441811066:web:cc3604e124ca94778ca1c3",
+            measurementId: "G-ME8HDTV2FV"
+        };
+
+        const IS_DEMO_MODE = firebaseConfig.apiKey === "YOUR_API_KEY";
+        let app, db;
+        if (!IS_DEMO_MODE) {
+            app = initializeApp(firebaseConfig);
+            db = getFirestore(app);
+        }
+
+        // ==================== CONSTANTS ====================
+        const DAYS = [
+            { id: 'mon', label: '월', fullLabel: '월요일', color: 'bg-slate-400' },
+            { id: 'tue', label: '화', fullLabel: '화요일', color: 'bg-slate-400' },
+            { id: 'wed', label: '수', fullLabel: '수요일', color: 'bg-slate-400' },
+            { id: 'thu', label: '목', fullLabel: '목요일', color: 'bg-slate-400' },
+            { id: 'fri', label: '금', fullLabel: '금요일', color: 'bg-slate-400' },
+            { id: 'sat', label: '토', fullLabel: '토요일', color: 'bg-blue-500' },
+            { id: 'sun', label: '일', fullLabel: '일요일', color: 'bg-red-500' },
+        ];
+
+        const HOURS = ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00'];
+
+        const FLOORS = [
+            { id: 'b1', label: '지하 1층', rooms: ['수영장', '소리나루'] },
+            { id: 'f1', label: '1층', rooms: ['나루지기실', '콤마스튜디오', '꿈나루실', '링키실'] },
+            { id: 'f2', label: '2층', rooms: ['방송미디어나루', '스튜디오M', '스튜디오H'] },
+            { id: 'f3', label: '3층', rooms: ['체육관'] }
+        ];
+        const ALL_ROOMS = FLOORS.flatMap(f => f.rooms);
+
+        const DEFAULT_TEAMS = [
+            { id: 'narujigi', name: '나루지기', fullType: '청소년운영위원회', schedule: '2,4,5주 토요일 14:00~17:00', typicalRooms: ['나루지기실'], bg: 'bg-amber-100', text: 'text-amber-800', border: 'border-amber-300' },
+            { id: 'dahim', name: '다힘', fullType: '공연동아리연합회', schedule: '보통 평일 저녁, 주말 종일', typicalRooms: ['콤마스튜디오', '소리나루', '스튜디오M'], bg: 'bg-sky-100', text: 'text-sky-800', border: 'border-sky-300' },
+            { id: 'story', name: '진로스토리텔러', fullType: '전문가 연합 활동단', schedule: '2,4주 토요일 14:00~17:00', typicalRooms: ['링키실', '꿈나루실', '스튜디오M'], bg: 'bg-emerald-100', text: 'text-emerald-800', border: 'border-emerald-300' },
+            { id: 'ynbc-univ', name: '대학생미디어', fullType: 'YNBC 대학생미디어활동단', schedule: '매주 금요일 14:00~17:00', typicalRooms: ['방송미디어나루', '스튜디오M', '스튜디오H'], bg: 'bg-indigo-100', text: 'text-indigo-800', border: 'border-indigo-300' },
+            { id: 'mascot', name: '마스코트', fullType: '마포구청소년축제기획단', schedule: '2,4주 토요일 14:00~17:00', typicalRooms: ['꿈나루실'], bg: 'bg-blue-100', text: 'text-blue-800', border: 'border-blue-300' },
+            { id: 'mulyuol', name: '물여울', fullType: '수영동아리', schedule: '매주 토요일 09:00~11:00', typicalRooms: ['수영장'], bg: 'bg-cyan-100', text: 'text-cyan-800', border: 'border-cyan-300' },
+            { id: 'halftime', name: '하프타임', fullType: '농구동아리', schedule: '매주 토요일 15:00~17:00', typicalRooms: ['체육관'], bg: 'bg-orange-100', text: 'text-orange-800', border: 'border-orange-300' },
+            { id: 'ynbc', name: '청소년방송국', fullType: 'YNBC 유스나루청소년방송국', schedule: '1,3주 토요일 14:00~17:00', typicalRooms: ['방송미디어나루', '스튜디오M', '스튜디오H'], bg: 'bg-purple-100', text: 'text-purple-800', border: 'border-purple-300' },
+        ];
+
+        // ==================== STATE ====================
+        let TEAMS = [...DEFAULT_TEAMS];
+        let currentUser = null; // { id, username, displayName, role, allowedTeams }
+        let activeDay = 'sat';
+        let selectedTeamId = null;
+        let reservations = {}; // merged: fixed + regular
+        let fixedSchedules = []; // array of { id, teamId, teamName, day, room, startHour, endHour, note }
+        let unsubscribeListeners = [];
+        let currentWeekId = getWeekId(new Date());
+        let clientIP = '알 수 없음';
+
+        // ==================== DEMO DATA ====================
+        const DEMO_USERS_PLAIN = [
+            { id: 'u_admin', username: 'admin', password: 'youthnaroo2026!', displayName: '시스템관리자', role: 'superadmin', allowedTeams: [], isActive: true },
+            { id: 'u_mgr1', username: 'manager1', password: 'mgr123', displayName: '서브관리자', role: 'admin', allowedTeams: [], isActive: true },
+            { id: 'u_naru1', username: 'naru1', password: '1234', displayName: '나루지기 홍길동', role: 'user', allowedTeams: ['narujigi'], isActive: true },
+            { id: 'u_dahim1', username: 'dahim1', password: '1234', displayName: '다힘 김철수', role: 'user', allowedTeams: ['dahim'], isActive: true },
+        ];
+        let DEMO_USERS = [];
+
+        let demoReservations = {
+            sat: {
+                '09:00-수영장': { teamId: 'mulyuol', teamName: '물여울', userName: '물여울 회원', userId: 'sys', isFixed: false },
+                '10:00-수영장': { teamId: 'mulyuol', teamName: '물여울', userName: '물여울 회원', userId: 'sys', isFixed: false },
+                '15:00-체육관': { teamId: 'halftime', teamName: '하프타임', userName: '하프타임 회원', userId: 'sys', isFixed: false },
+                '16:00-체육관': { teamId: 'halftime', teamName: '하프타임', userName: '하프타임 회원', userId: 'sys', isFixed: false },
+            },
+            fri: {
+                '14:00-방송미디어나루': { teamId: 'ynbc-univ', teamName: '대학생미디어', userName: '대학생미디어 회원', userId: 'sys', isFixed: false },
+                '15:00-방송미디어나루': { teamId: 'ynbc-univ', teamName: '대학생미디어', userName: '대학생미디어 회원', userId: 'sys', isFixed: false },
+            }
+        };
+
+        let demoFixedSchedules = [
+            { id: 'fs1', teamId: 'narujigi', teamName: '나루지기', day: 'sat', room: '나루지기실', startHour: '14:00', endHour: '17:00', note: '2,4,5주 고정', createdBy: '관리자' },
+        ];
+
+        let demoActivityLogs = [];
+        let demoLoginLogs = [];
+
+        // ==================== UTILS ====================
+        function getWeekId(date) {
+            const d = new Date(date);
+            d.setHours(0, 0, 0, 0);
+            d.setDate(d.getDate() + 3 - (d.getDay() + 6) % 7);
+            const week1 = new Date(d.getFullYear(), 0, 4);
+            const wn = 1 + Math.round(((d - week1) / 864e5 - 3 + (week1.getDay() + 6) % 7) / 7);
+            return `${d.getFullYear()}-W${String(wn).padStart(2, '0')}`;
+        }
+
+        async function hashPassword(password) {
+            const data = new TextEncoder().encode(password);
+            const buf = await crypto.subtle.digest('SHA-256', data);
+            return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+        }
+
+        function getTeam(teamId) { return TEAMS.find(t => t.id === teamId) || null; }
+        function isAdmin() { return currentUser && (currentUser.role === 'admin' || currentUser.role === 'superadmin'); }
+        function isSuperAdmin() { return currentUser && currentUser.role === 'superadmin'; }
+
+        function showToast(message, type = 'success') {
+            const toast = document.getElementById('toast');
+            const msg = document.getElementById('toast-msg');
+            const icon = document.getElementById('toast-icon');
+            if (!toast || !msg) return;
+            msg.textContent = message;
+            const base = 'fixed bottom-6 left-1/2 -translate-x-1/2 z-[100] flex items-center gap-2 text-white px-5 py-3 rounded-2xl shadow-2xl text-sm font-semibold max-w-sm w-full pointer-events-none transition-all duration-300';
+            if (type === 'success') { toast.className = base + ' bg-emerald-600'; icon.setAttribute('data-lucide', 'check-circle'); }
+            else if (type === 'error') { toast.className = base + ' bg-red-600'; icon.setAttribute('data-lucide', 'alert-circle'); }
+            else { toast.className = base + ' bg-blue-600'; icon.setAttribute('data-lucide', 'info'); }
+            toast.classList.remove('opacity-0', 'translate-y-4');
+            toast.classList.add('opacity-100', 'translate-y-0');
+            lucide.createIcons();
+            clearTimeout(toast._t);
+            toast._t = setTimeout(() => { toast.classList.add('opacity-0', 'translate-y-4'); }, 3200);
+        }
+
+        function showModal(id) { document.getElementById(id)?.classList.remove('hidden'); }
+        function hideModal(id) { document.getElementById(id)?.classList.add('hidden'); }
+
+        function expandHourRange(startHour, endHour) {
+            const si = HOURS.indexOf(startHour);
+            const ei = HOURS.indexOf(endHour);
+            if (si < 0 || ei < 0 || ei <= si) return [];
+            return HOURS.slice(si, ei);
+        }
+
+        function buildMergedReservations(dayRaw, dayFixed) {
+            const merged = {};
+            dayFixed.forEach(fs => {
+                expandHourRange(fs.startHour, fs.endHour).forEach(hour => {
+                    merged[`${hour}-${fs.room}`] = {
+                        teamId: fs.teamId, teamName: fs.teamName,
+                        userName: fs.createdBy || '관리자', userId: 'fixed',
+                        isFixed: true, fixedNote: fs.note, fixedId: fs.id
+                    };
+                });
+            });
+            Object.entries(dayRaw).forEach(([key, val]) => {
+                if (!merged[key]) merged[key] = val;
+            });
+            return merged;
+        }
+
+        // ==================== DEMO INIT ====================
+        async function initDemoUsers() {
+            for (const u of DEMO_USERS_PLAIN) {
+                DEMO_USERS.push({ ...u, passwordHash: await hashPassword(u.password) });
+            }
+        }
+
+        async function fetchClientIP() {
+            try {
+                const r = await fetch('https://api.ipify.org?format=json');
+                clientIP = (await r.json()).ip;
+            } catch { clientIP = '알 수 없음'; }
+        }
+
+        // ==================== AUTH ====================
+        async function loginUser(username, password) {
+            const hash = await hashPassword(password);
+            if (IS_DEMO_MODE) {
+                const u = DEMO_USERS.find(x => x.username === username && x.passwordHash === hash && x.isActive);
+                if (!u) { addLoginLogDemo(null, username, 'failed'); throw new Error('아이디 또는 비밀번호가 올바르지 않습니다.'); }
+                addLoginLogDemo(u.id, username, 'login', u.displayName);
+                return { id: u.id, username: u.username, displayName: u.displayName, role: u.role, allowedTeams: u.allowedTeams };
+            }
+            const q = query(collection(db, 'users'), where('username', '==', username), where('isActive', '==', true));
+            const snap = await getDocs(q);
+            if (snap.empty) { addLoginLog(null, username, 'failed'); throw new Error('아이디 또는 비밀번호가 올바르지 않습니다.'); }
+            const uDoc = snap.docs[0];
+            const ud = uDoc.data();
+            if (ud.passwordHash !== hash) { addLoginLog(uDoc.id, username, 'failed'); throw new Error('아이디 또는 비밀번호가 올바르지 않습니다.'); }
+            addLoginLog(uDoc.id, username, 'login', ud.displayName);
+            return { id: uDoc.id, username: ud.username, displayName: ud.displayName, role: ud.role, allowedTeams: ud.allowedTeams || [] };
+        }
+
+        async function doLogout() {
+            if (currentUser) {
+                IS_DEMO_MODE
+                    ? addLoginLogDemo(currentUser.id, currentUser.username, 'logout', currentUser.displayName)
+                    : addLoginLog(currentUser.id, currentUser.username, 'logout', currentUser.displayName);
+            }
+            sessionStorage.removeItem('ys_session');
+            currentUser = null; selectedTeamId = null;
+            updateHeader(); renderTeamSelectors(); renderAdminSection(); renderTable();
+            showToast('로그아웃되었습니다.', 'info');
+            setTimeout(() => showModal('login-modal'), 400);
+        }
+
+        // ==================== LOGGING ====================
+        async function addLoginLog(userId, username, action, displayName = '') {
+            if (!db) return;
+            await addDoc(collection(db, 'login_logs'), {
+                userId: userId || null, username, displayName, action,
+                ip: clientIP, userAgent: navigator.userAgent.slice(0, 200), timestamp: serverTimestamp()
+            });
+        }
+        function addLoginLogDemo(userId, username, action, displayName = '') {
+            demoLoginLogs.unshift({ userId, username, displayName, action, ip: clientIP, userAgent: navigator.userAgent.slice(0, 100), timestamp: new Date().toISOString() });
+        }
+
+        async function addActivityLog(action, target, before = null, after = null) {
+            if (!currentUser) return;
+            const logData = { userId: currentUser.id, username: currentUser.username, displayName: currentUser.displayName, userRole: currentUser.role, action, target, before, after };
+            if (IS_DEMO_MODE) { demoActivityLogs.unshift({ ...logData, timestamp: new Date().toISOString() }); renderSideLogs(); return; }
+            await addDoc(collection(db, 'activity_logs'), { ...logData, timestamp: serverTimestamp() });
+        }
+
+        // ==================== DATA ====================
+        async function initData() {
+            if (IS_DEMO_MODE) {
+                refreshDemoDay(); return;
+            }
+            loadTeamsFromDB();
+            subscribeToFixedSchedules();
+            subscribeToReservations();
+        }
+
+        function refreshDemoDay() {
+            const dayFixed = demoFixedSchedules.filter(fs => fs.day === activeDay);
+            reservations = buildMergedReservations(demoReservations[activeDay] || {}, dayFixed);
+            renderTable();
+        }
+
+        function subscribeToReservations() {
+            unsubscribeListeners.forEach(u => u()); unsubscribeListeners = [];
+            const col = collection(db, `reservations/${currentWeekId}/${activeDay}`);
+            const unsub = onSnapshot(col, snap => {
+                const raw = {};
+                snap.forEach(d => { raw[d.id] = d.data(); });
+                const df = fixedSchedules.filter(fs => fs.day === activeDay);
+                reservations = buildMergedReservations(raw, df);
+                renderTable();
+            }, err => { console.error(err); showToast('실시간 연결 오류', 'error'); });
+            unsubscribeListeners.push(unsub);
+        }
+
+        function subscribeToFixedSchedules() {
+            const col = collection(db, 'fixed_schedules');
+            const unsub = onSnapshot(col, snap => {
+                fixedSchedules = [];
+                snap.forEach(d => { fixedSchedules.push({ id: d.id, ...d.data() }); });
+            });
+            unsubscribeListeners.push(unsub);
+        }
+
+        async function loadTeamsFromDB() {
+            try {
+                const snap = await getDocs(collection(db, 'teams'));
+                if (!snap.empty) { TEAMS = []; snap.forEach(d => TEAMS.push({ id: d.id, ...d.data() })); }
+            } catch (e) { /* fallback to DEFAULT_TEAMS */ }
+        }
+
+        // ==================== RESERVATIONS ====================
+        async function makeReservation(hour, room) {
+            if (!currentUser) { showToast('로그인이 필요합니다.', 'error'); return; }
+            if (!selectedTeamId) { showToast('활동단을 선택해주세요.', 'error'); return; }
+            const key = `${hour}-${room}`;
+            if (reservations[key]) { showToast('이미 예약된 시간대입니다.', 'error'); return; }
+            const team = getTeam(selectedTeamId);
+            if (!team) return;
+            const resData = { teamId: team.id, teamName: team.name, userName: currentUser.displayName, userId: currentUser.id, isFixed: false };
+
+            if (IS_DEMO_MODE) {
+                if (!demoReservations[activeDay]) demoReservations[activeDay] = {};
+                demoReservations[activeDay][key] = resData;
+                refreshDemoDay();
+                await addActivityLog('예약_생성', `${activeDay} ${hour} ${room}`, null, resData);
+                showToast(`${team.name} 예약 완료! (데모)`, 'success'); return;
+            }
+            const docRef = doc(db, `reservations/${currentWeekId}/${activeDay}`, key);
+            try {
+                await runTransaction(db, async tx => {
+                    const ex = await tx.get(docRef);
+                    if (ex.exists()) throw new Error('이미 예약된 시간대입니다.');
+                    tx.set(docRef, { ...resData, createdAt: serverTimestamp() });
+                });
+                await addActivityLog('예약_생성', `${activeDay} ${hour} ${room}`, null, resData);
+                showToast(`${team.name} 예약 완료!`, 'success');
+            } catch (e) { showToast(e.message || '예약 실패', 'error'); }
+        }
+
+        async function cancelReservation(hour, room) {
+            const key = `${hour}-${room}`;
+            const existing = reservations[key];
+            if (!existing || !currentUser) return;
+            if (existing.isFixed && !isAdmin()) { showToast('고정 일정은 관리자만 취소할 수 있습니다.', 'error'); return; }
+            const cancel = isAdmin() || (currentUser.allowedTeams || []).includes(existing.teamId);
+            if (!cancel) { showToast('본인 활동단 예약만 취소할 수 있습니다.', 'error'); return; }
+            if (!confirm(`[${hour} - ${room}]\n${existing.teamName} 예약을 취소하시겠습니까?`)) return;
+
+            const forced = isAdmin() && existing.userId !== currentUser.id;
+            const action = existing.isFixed ? '고정일정_삭제' : (forced ? '예약_강제취소' : '예약_취소');
+
+            if (IS_DEMO_MODE) {
+                if (existing.isFixed) {
+                    demoFixedSchedules = demoFixedSchedules.filter(fs => {
+                        const hrs = expandHourRange(fs.startHour, fs.endHour);
+                        return !(fs.day === activeDay && fs.room === room && hrs.includes(hour));
+                    });
+                } else {
+                    if (demoReservations[activeDay]) delete demoReservations[activeDay][key];
+                }
+                refreshDemoDay();
+                await addActivityLog(action, `${activeDay} ${hour} ${room}`, existing, null);
+                showToast('예약이 취소되었습니다. (데모)', 'success'); return;
+            }
+            try {
+                if (existing.isFixed) {
+                    const q = query(collection(db, 'fixed_schedules'), where('day', '==', activeDay), where('room', '==', room));
+                    const snap = await getDocs(q);
+                    const batch = writeBatch(db);
+                    snap.forEach(d => {
+                        const hrs = expandHourRange(d.data().startHour, d.data().endHour);
+                        if (hrs.includes(hour)) batch.delete(d.ref);
+                    });
+                    await batch.commit();
+                } else {
+                    await deleteDoc(doc(db, `reservations/${currentWeekId}/${activeDay}`, key));
+                }
+                await addActivityLog(action, `${activeDay} ${hour} ${room}`, existing, null);
+                showToast('예약이 취소되었습니다.', 'success');
+            } catch (e) { showToast('취소 실패: ' + e.message, 'error'); }
+        }
+
+        // ==================== FIXED SCHEDULES ====================
+        async function addFixedScheduleRange({ teamId, day, room, startHour, endHour, note }) {
+            const hrs = expandHourRange(startHour, endHour);
+            if (hrs.length === 0) { showToast('시간 범위가 올바르지 않습니다. 종료 시간은 시작 시간보다 늦어야 합니다.', 'error'); return; }
+            const team = getTeam(teamId);
+            if (!team) return;
+            const fsData = { teamId, teamName: team.name, day, room, startHour, endHour, note: note || '', createdBy: currentUser.displayName };
+
+            if (IS_DEMO_MODE) {
+                demoFixedSchedules.push({ id: `fs_${Date.now()}`, ...fsData });
+                if (day === activeDay) refreshDemoDay();
+                await addActivityLog('고정일정_추가', `${day} ${startHour}~${endHour} ${room}`, null, fsData);
+                showToast('고정 일정이 추가되었습니다. (데모)', 'success'); return;
+            }
+            try {
+                await addDoc(collection(db, 'fixed_schedules'), { ...fsData, createdAt: serverTimestamp() });
+                await addActivityLog('고정일정_추가', `${day} ${startHour}~${endHour} ${room}`, null, fsData);
+                showToast('고정 일정이 추가되었습니다.', 'success');
+            } catch (e) { showToast('추가 실패: ' + e.message, 'error'); }
+        }
+
+        // ==================== WEEKLY RESET ====================
+        async function weeklyReset() {
+            if (!isAdmin()) return;
+            if (!confirm(`⚠️ 주간 리셋을 실행합니다.\n\n주차: ${currentWeekId}\n일반 예약이 모두 삭제됩니다. (고정 일정 유지)\n과거 기록에 보관됩니다.\n\n계속하시겠습니까?`)) return;
+
+            if (IS_DEMO_MODE) {
+                DAYS.forEach(day => {
+                    if (demoReservations[day.id]) {
+                        Object.keys(demoReservations[day.id]).forEach(k => delete demoReservations[day.id][k]);
+                    }
+                });
+                refreshDemoDay();
+                await addActivityLog('주간리셋', currentWeekId, null, null);
+                showToast('주간 리셋 완료 (데모)', 'success'); return;
+            }
+            try {
+                const archiveData = {};
+                for (const day of DAYS) {
+                    const snap = await getDocs(collection(db, `reservations/${currentWeekId}/${day.id}`));
+                    archiveData[day.id] = {};
+                    snap.forEach(d => { archiveData[day.id][d.id] = d.data(); });
+                }
+                await setDoc(doc(db, 'archive', currentWeekId), { data: archiveData, archivedAt: serverTimestamp(), archivedBy: currentUser.displayName });
+                const batch = writeBatch(db);
+                for (const day of DAYS) {
+                    const snap = await getDocs(collection(db, `reservations/${currentWeekId}/${day.id}`));
+                    snap.forEach(d => batch.delete(d.ref));
+                }
+                await batch.commit();
+                await addActivityLog('주간리셋', currentWeekId, null, null);
+                showToast('주간 리셋 완료. 과거 기록이 보관되었습니다.', 'success');
+            } catch (e) { showToast('리셋 실패: ' + e.message, 'error'); }
+        }
+
+        // ==================== ARCHIVE VIEWER ====================
+        async function openArchiveViewer() {
+            showModal('archive-modal');
+            const sel = document.getElementById('archive-week-sel');
+            if (!sel) return;
+            sel.innerHTML = '<option value="">주차를 선택하세요</option>';
+            if (IS_DEMO_MODE) { sel.innerHTML = '<option value="">과거 기록 없음 (데모 모드)</option>'; return; }
+            try {
+                const snap = await getDocs(collection(db, 'archive'));
+                const weeks = []; snap.forEach(d => weeks.push(d.id));
+                weeks.sort().reverse();
+                weeks.forEach(w => sel.innerHTML += `<option value="${w}">${w}</option>`);
+            } catch { sel.innerHTML = '<option value="">로드 실패</option>'; }
+        }
+
+        async function loadArchiveData(weekId) {
+            const container = document.getElementById('archive-content');
+            if (!container) return;
+            container.innerHTML = '<div class="text-center py-8 text-slate-400 text-sm animate-pulse">로딩 중...</div>';
+            if (IS_DEMO_MODE) { container.innerHTML = '<div class="text-center py-8 text-slate-400 text-sm">데모 모드에서는 과거 기록이 없습니다.</div>'; return; }
+            try {
+                const snap = await getDoc(doc(db, 'archive', weekId));
+                if (!snap.exists()) { container.innerHTML = '<div class="text-center py-8 text-slate-400 text-sm">기록을 찾을 수 없습니다.</div>'; return; }
+                renderArchiveGrid(container, snap.data().data, weekId);
+            } catch (e) { container.innerHTML = `<div class="text-center py-8 text-red-400 text-sm">${e.message}</div>`; }
+        }
+
+        function renderArchiveGrid(container, data, weekId) {
+            let html = `<div class="mb-3 flex items-center justify-between"><span class="text-sm font-bold text-slate-700">${weekId} 예약 이력</span><button onclick="exportArchiveExcel('${weekId}')" class="flex items-center gap-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1.5 rounded-lg hover:bg-emerald-100 transition-all"><i data-lucide="download" class="w-3.5 h-3.5"></i> 엑셀 저장</button></div>`;
+            DAYS.forEach(day => {
+                const dd = data[day.id] || {};
+                const hasData = Object.keys(dd).length > 0;
+                html += `<div class="mb-5"><h4 class="text-xs font-bold text-slate-600 mb-2 flex items-center gap-1.5"><span class="w-2 h-2 rounded-full ${day.color} inline-block"></span>${day.fullLabel} ${hasData ? `<span class="text-[10px] font-normal text-slate-400">(${Object.keys(dd).length}건)</span>` : '<span class="text-[10px] text-slate-300">예약 없음</span>'}</h4>`;
+                if (hasData) {
+                    html += `<div class="overflow-x-auto"><table class="w-full border-collapse text-[10px]" style="min-width:800px"><thead><tr class="bg-slate-100 border border-slate-200"><th class="py-1.5 px-2 border border-slate-200 font-bold text-slate-500 w-14">시간</th>${ALL_ROOMS.map(r => `<th class="py-1.5 px-2 border border-slate-200 font-bold text-slate-600 min-w-[75px]">${r}</th>`).join('')}</tr></thead><tbody>${HOURS.map(hour => { const row = `<tr class="border border-slate-100"><td class="py-1.5 px-2 border border-slate-200 font-bold text-slate-500 bg-slate-50">${hour}</td>${ALL_ROOMS.map(room => { const key = `${hour}-${room}`; const res = dd[key]; if (res) { const t = getTeam(res.teamId); return `<td class="py-1.5 px-2 border border-slate-200"><span class="px-1.5 py-0.5 rounded text-[9px] font-bold ${t ? `${t.bg} ${t.text}` : 'bg-slate-100 text-slate-600'}">${res.teamName}${res.isFixed ? ' 🔒' : ''}</span></td>`; } return `<td class="py-1.5 px-2 border border-slate-200 text-slate-200 text-center">·</td>` }).join('')}</tr>`; return row }).join('')}</tbody></table></div>`;
+                }
+                html += `</div>`;
+            });
+            container.innerHTML = html;
+            lucide.createIcons();
+        }
+
+        window.exportArchiveExcel = function (weekId) {
+            showToast('엑셀 준비 중...', 'info');
+            setTimeout(async () => {
+                const snap = await getDoc(doc(db, 'archive', weekId));
+                if (!snap.exists()) { showToast('데이터 없음', 'error'); return; }
+                const data = snap.data().data;
+                const wb = XLSX.utils.book_new();
+                DAYS.forEach(day => {
+                    const dd = data[day.id] || {};
+                    const rows = [['시간', ...ALL_ROOMS]];
+                    HOURS.forEach(h => { rows.push([h, ...ALL_ROOMS.map(r => { const res = dd[`${h}-${r}`]; return res ? `${res.teamName}${res.isFixed ? ' (고정)' : ''}` : ''; })]); });
+                    const ws = XLSX.utils.aoa_to_sheet(rows);
+                    ws['!cols'] = [{ wch: 8 }, ...ALL_ROOMS.map(() => ({ wch: 14 }))];
+                    XLSX.utils.book_append_sheet(wb, ws, day.fullLabel);
+                });
+                XLSX.writeFile(wb, `유스나루_${weekId}.xlsx`);
+                showToast('엑셀 다운로드 시작!', 'success');
+            }, 100);
+        };
+
+        function exportCurrentExcel() {
+            const wb = XLSX.utils.book_new();
+            DAYS.forEach(day => {
+                const dd = IS_DEMO_MODE ? (demoReservations[day.id] || {}) : {};
+                const df = (IS_DEMO_MODE ? demoFixedSchedules : fixedSchedules).filter(fs => fs.day === day.id);
+                const merged = buildMergedReservations(dd, df);
+                const rows = [['시간', ...ALL_ROOMS]];
+                HOURS.forEach(h => { rows.push([h, ...ALL_ROOMS.map(r => { const res = merged[`${h}-${r}`]; return res ? `${res.teamName}${res.isFixed ? ' (고정)' : ''}` : ''; })]); });
+                const ws = XLSX.utils.aoa_to_sheet(rows);
+                ws['!cols'] = [{ wch: 8 }, ...ALL_ROOMS.map(() => ({ wch: 14 }))];
+                XLSX.utils.book_append_sheet(wb, ws, day.fullLabel);
+            });
+            XLSX.writeFile(wb, `유스나루_예약현황_${currentWeekId}.xlsx`);
+            showToast('엑셀 파일 다운로드!', 'success');
+        }
+
+        // ==================== RENDER ====================
+        function renderDayTabs() {
+            const c = document.getElementById('day-tabs');
+            if (!c) return;
+            c.innerHTML = '';
+            DAYS.forEach(day => {
+                const isActive = day.id === activeDay;
+                const btn = document.createElement('button');
+                btn.className = `flex-1 min-w-[44px] py-2.5 px-1 rounded-xl text-xs font-bold transition-all duration-200 flex flex-col items-center gap-1 ${isActive ? 'bg-white text-teal-700 shadow-sm' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-700'}`;
+                btn.innerHTML = `<span class="w-2 h-2 rounded-full ${day.color}"></span><span>${day.label}</span><span class="text-[9px] font-normal opacity-60 hidden sm:block">${day.fullLabel}</span>`;
+                btn.addEventListener('click', () => switchDay(day.id));
+                c.appendChild(btn);
+            });
+        }
+
+        function renderTeamSelectors() {
+            const c = document.getElementById('team-selectors');
+            if (!c) return;
+            if (!currentUser) {
+                c.innerHTML = `<div class="text-center py-8 text-slate-400"><i data-lucide="lock" class="w-8 h-8 mx-auto mb-2 opacity-30"></i><p class="text-xs font-medium">로그인 후 예약 가능합니다</p></div>`;
+                lucide.createIcons(); return;
+            }
+            const teamsToShow = isAdmin() ? TEAMS : TEAMS.filter(t => (currentUser.allowedTeams || []).includes(t.id));
+            if (teamsToShow.length === 0) {
+                c.innerHTML = `<div class="text-center py-8 text-slate-400"><i data-lucide="users-x" class="w-8 h-8 mx-auto mb-2 opacity-30"></i><p class="text-xs">배정된 활동단이 없습니다.</p><p class="text-xs mt-1 text-slate-300">관리자에게 문의하세요.</p></div>`;
+                lucide.createIcons(); return;
+            }
+            c.innerHTML = '';
+            teamsToShow.forEach(team => {
+                const isSelected = selectedTeamId === team.id;
+                const btn = document.createElement('button');
+                btn.className = `w-full p-2.5 rounded-xl text-left border-2 transition-all flex flex-col gap-1 ${team.bg} ${team.text} ${team.border} ${isSelected ? 'ring-2 ring-teal-500 ring-offset-1 shadow-sm' : 'hover:opacity-90'}`;
+                const tags = (team.typicalRooms || []).slice(0, 2).map(r => `<span class="bg-white/60 text-[9px] px-1.5 py-0.5 rounded font-medium">${r}</span>`).join('');
+                btn.innerHTML = `
+                    <div class="flex items-start justify-between gap-1">
+                        <div class="min-w-0"><div class="text-[9px] font-bold opacity-50 truncate">${team.fullType}</div><div class="text-xs font-bold truncate">${team.name}</div></div>
+                        ${isSelected ? '<i data-lucide="check-circle" class="w-3.5 h-3.5 flex-shrink-0 mt-0.5"></i>' : ''}
+                    </div>
+                    ${team.schedule ? `<div class="flex items-center gap-1 text-[10px] opacity-70"><i data-lucide="clock" class="w-2.5 h-2.5 flex-shrink-0"></i><span class="truncate">${team.schedule}</span></div>` : ''}
+                    ${tags ? `<div class="flex flex-wrap gap-1">${tags}</div>` : ''}
+                `;
+                btn.addEventListener('click', () => { selectedTeamId = team.id; renderTeamSelectors(); lucide.createIcons(); });
+                c.appendChild(btn);
+            });
+            if (teamsToShow.length === 1 && !selectedTeamId) { selectedTeamId = teamsToShow[0].id; renderTeamSelectors(); return; }
+            lucide.createIcons();
+        }
+
+        function renderTable() {
+            const body = document.getElementById('schedule-body');
+            if (!body) return;
+            body.innerHTML = '';
+            HOURS.forEach(hour => {
+                const tr = document.createElement('tr');
+                tr.className = 'hover:bg-slate-50/30 transition-colors border-b border-slate-100';
+                const timeTd = document.createElement('td');
+                timeTd.className = 'py-3 px-2 text-center font-bold text-xs text-slate-500 bg-slate-50/80 border-r border-slate-200 w-16 sticky left-0 z-10';
+                timeTd.textContent = hour;
+                tr.appendChild(timeTd);
+                ALL_ROOMS.forEach(room => {
+                    const floor = FLOORS.find(f => f.rooms.includes(room));
+                    const isLast = floor && floor.rooms[floor.rooms.length - 1] === room;
+                    const td = document.createElement('td');
+                    td.className = `p-1 ${isLast ? 'border-r-2 border-slate-300' : 'border-r border-slate-100'} relative min-w-[90px]`;
+                    const key = `${hour}-${room}`;
+                    const res = reservations[key];
+                    if (res) {
+                        const team = getTeam(res.teamId);
+                        const canCancel = currentUser && (isAdmin() || (currentUser.allowedTeams || []).includes(res.teamId)) && (!res.isFixed || isAdmin());
+                        td.innerHTML = `<div class="w-full min-h-[46px] flex flex-col justify-center items-center px-1 py-1 rounded-lg border-2 shadow-sm relative group ${team ? `${team.bg} ${team.text} ${team.border}` : 'bg-slate-100 text-slate-600 border-slate-300'} ${res.isFixed ? 'ring-1 ring-current/20 shadow-md' : ''}">
+                            ${res.isFixed ? '<span class="absolute top-0.5 right-0.5 text-[9px]">🔒</span>' : ''}
+                            <span class="text-[9px] font-bold text-center w-full truncate px-1" title="${res.teamName}">${res.teamName}</span>
+                            <span class="text-[8px] opacity-50 mt-0.5 truncate w-full text-center px-1">${res.userName || ''}</span>
+                            ${canCancel ? `<button onclick="handleCancelClick('${hour}','${room}')" class="absolute inset-0 w-full h-full rounded-lg opacity-0 group-hover:opacity-100 bg-black/15 flex items-center justify-center transition-all" title="예약 취소"><i data-lucide="x-circle" class="w-5 h-5 text-white drop-shadow"></i></button>` : ''}
+                        </div>`;
+                    } else {
+                        const canBook = currentUser && selectedTeamId;
+                        td.innerHTML = `<div onclick="${canBook ? `handleBookClick('${hour}','${room}')` : ''}" class="w-full min-h-[46px] flex items-center justify-center rounded-lg border border-dashed ${canBook ? 'border-slate-200 hover:border-teal-400 hover:bg-teal-50 cursor-pointer' : 'border-slate-100'} transition-all group">
+                            ${canBook ? `<span class="text-[9px] text-slate-300 group-hover:text-teal-500 flex items-center gap-0.5 font-semibold"><i data-lucide="plus" class="w-3 h-3"></i> 예약</span>` : ''}
+                        </div>`;
+                    }
+                    tr.appendChild(td);
+                });
+                body.appendChild(tr);
+            });
+            lucide.createIcons();
+        }
+
+        function renderAdminSection() {
+            const panel = document.getElementById('admin-section');
+            const locked = document.getElementById('admin-locked');
+            if (!panel || !locked) return;
+            if (isAdmin()) { panel.classList.remove('hidden'); locked.classList.add('hidden'); }
+            else { panel.classList.add('hidden'); locked.classList.remove('hidden'); }
+        }
+
+        function renderSideLogs() {
+            const c = document.getElementById('side-logs-list');
+            if (!c) return;
+            const logs = IS_DEMO_MODE ? demoActivityLogs : [];
+            if (logs.length === 0) {
+                c.innerHTML = `<div class="text-center py-6 text-slate-400"><i data-lucide="activity" class="w-6 h-6 mx-auto mb-2 opacity-30"></i><p class="text-xs">활동 기록이 없습니다</p></div>`;
+                lucide.createIcons(); return;
+            }
+            const colors = { '예약_생성': 'bg-emerald-50 text-emerald-700', '예약_취소': 'bg-slate-50 text-slate-600', '예약_강제취소': 'bg-red-50 text-red-600', '고정일정_추가': 'bg-blue-50 text-blue-700', '고정일정_삭제': 'bg-orange-50 text-orange-700', '주간리셋': 'bg-purple-50 text-purple-700' };
+            c.innerHTML = logs.slice(0, 20).map(log => {
+                const col = colors[log.action] || 'bg-slate-50 text-slate-600';
+                const time = typeof log.timestamp === 'string' ? new Date(log.timestamp).toLocaleString('ko-KR') : '-';
+                return `<div class="p-2 rounded-lg border border-slate-100 bg-white"><div class="flex items-center gap-1 flex-wrap"><span class="text-[10px] font-bold text-slate-700">${log.displayName || log.username}</span><span class="text-[9px] px-1.5 py-0.5 rounded font-bold ${col}">${log.action}</span></div><p class="text-[10px] text-slate-500 mt-0.5 truncate">${log.target}</p><p class="text-[9px] text-slate-400">${time}</p></div>`;
+            }).join('');
+        }
+
+        // ==================== EVENT HANDLERS ====================
+        window.handleBookClick = (h, r) => makeReservation(h, r);
+        window.handleCancelClick = (h, r) => cancelReservation(h, r);
+
+        function switchDay(dayId) {
+            activeDay = dayId;
+            renderDayTabs();
+            if (IS_DEMO_MODE) { refreshDemoDay(); return; }
+            subscribeToReservations();
+        }
+
+        // ==================== AUTH UI ====================
+        async function handleLoginSubmit(e) {
+            e.preventDefault();
+            const username = document.getElementById('login-username').value.trim();
+            const password = document.getElementById('login-password').value;
+            const errEl = document.getElementById('login-error');
+            const btn = document.getElementById('login-submit-btn');
+            errEl.classList.add('hidden');
+            btn.disabled = true;
+            btn.innerHTML = `<span class="flex items-center gap-2 justify-center"><i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> 로그인 중...</span>`;
+            lucide.createIcons();
+            try {
+                const user = await loginUser(username, password);
+                currentUser = user;
+                sessionStorage.setItem('ys_session', JSON.stringify(user));
+                if (!isAdmin() && (user.allowedTeams || []).length > 0) selectedTeamId = user.allowedTeams[0];
+                else if (isAdmin()) selectedTeamId = TEAMS[0]?.id || null;
+                hideModal('login-modal');
+                updateHeader(); renderTeamSelectors(); renderAdminSection(); renderTable();
+                showToast(`환영합니다, ${user.displayName}님!`, 'success');
+            } catch (err) {
+                errEl.textContent = err.message; errEl.classList.remove('hidden');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = `<span class="flex items-center gap-2 justify-center"><i data-lucide="log-in" class="w-4 h-4"></i> 로그인</span>`;
+                lucide.createIcons();
+            }
+        }
+
+        function updateHeader() {
+            const el = document.getElementById('header-user');
+            if (!el) return;
+            if (currentUser) {
+                const roleLabel = { superadmin: '👑 주관리자', admin: '🔧 관리자', user: '👤' }[currentUser.role] || '';
+                el.innerHTML = `<div class="flex items-center gap-2 ${isAdmin() ? 'bg-amber-50 border-amber-200' : 'bg-teal-50 border-teal-100'} px-3 py-1.5 rounded-lg border">
+                    <span class="text-xs font-bold ${isAdmin() ? 'text-amber-700' : 'text-teal-700'}">${roleLabel} ${currentUser.displayName}</span>
+                    ${isAdmin() ? `<a href="admin.html" class="text-xs text-amber-600 hover:text-amber-800 font-semibold border-l border-amber-200 pl-2 transition-colors">관리 페이지 →</a>` : ''}
+                    <button id="logout-btn" class="text-xs text-slate-400 hover:text-red-500 transition-colors ${isAdmin() ? 'border-l border-amber-200 pl-2' : ''}"><i data-lucide="log-out" class="w-3.5 h-3.5"></i></button>
+                </div>`;
+                document.getElementById('logout-btn').addEventListener('click', doLogout);
+            } else {
+                el.innerHTML = `<button id="login-btn-h" class="flex items-center gap-1.5 text-xs font-semibold text-teal-700 bg-teal-50 hover:bg-teal-100 border border-teal-200 px-3 py-1.5 rounded-lg transition-all"><i data-lucide="log-in" class="w-3.5 h-3.5"></i> 로그인</button>`;
+                document.getElementById('login-btn-h').addEventListener('click', () => showModal('login-modal'));
+            }
+            lucide.createIcons();
+        }
+
+        // ==================== SIDE TABS ====================
+        function setupSideTabs() {
+            const tabs = [
+                { tab: 'tab-teams', panel: 'panel-teams' },
+                { tab: 'tab-admin-side', panel: 'panel-admin-side' },
+                { tab: 'tab-logs-side', panel: 'panel-logs-side' },
+            ];
+            tabs.forEach(({ tab, panel }, i) => {
+                const btn = document.getElementById(tab);
+                if (!btn) return;
+                btn.addEventListener('click', () => {
+                    tabs.forEach(({ tab: t, panel: p }, j) => {
+                        const tb = document.getElementById(t), pb = document.getElementById(p);
+                        if (!tb || !pb) return;
+                        if (j === i) { tb.classList.add('border-teal-500', 'text-teal-600'); tb.classList.remove('border-transparent', 'text-slate-500'); pb.classList.remove('hidden'); }
+                        else { tb.classList.remove('border-teal-500', 'text-teal-600'); tb.classList.add('border-transparent', 'text-slate-500'); pb.classList.add('hidden'); }
+                    });
+                    if (tab === 'tab-logs-side') renderSideLogs();
+                });
+            });
+        }
+
+        // ==================== FIXED SCHEDULE FORM ====================
+        function setupFixedForm() {
+            const form = document.getElementById('fixed-schedule-form');
+            if (!form) return;
+            const teamSel = document.getElementById('fs-team');
+            const daySel = document.getElementById('fs-day');
+            const startSel = document.getElementById('fs-start-hour');
+            const endSel = document.getElementById('fs-end-hour');
+            const roomSel = document.getElementById('fs-room');
+            TEAMS.forEach(t => teamSel.appendChild(new Option(t.name, t.id)));
+            DAYS.forEach(d => daySel.appendChild(new Option(d.fullLabel, d.id)));
+            HOURS.forEach(h => { startSel.appendChild(new Option(h, h)); endSel.appendChild(new Option(h, h)); });
+            startSel.value = '14:00'; endSel.value = '17:00';
+            daySel.value = 'sat';
+            ALL_ROOMS.forEach(r => roomSel.appendChild(new Option(r, r)));
+            form.addEventListener('submit', async e => {
+                e.preventDefault();
+                await addFixedScheduleRange({ teamId: teamSel.value, day: daySel.value, room: roomSel.value, startHour: startSel.value, endHour: endSel.value, note: document.getElementById('fs-note').value });
+                form.reset(); startSel.value = '14:00'; endSel.value = '17:00'; hideModal('fixed-schedule-modal');
+            });
+        }
+
+        // ==================== INIT ====================
+        async function initApp() {
+            await initDemoUsers();
+            fetchClientIP(); // background
+
+            // Session restore
+            const saved = sessionStorage.getItem('ys_session');
+            if (saved) {
+                try {
+                    currentUser = JSON.parse(saved);
+                    if (!isAdmin() && (currentUser.allowedTeams || []).length > 0) selectedTeamId = currentUser.allowedTeams[0];
+                    else if (isAdmin()) selectedTeamId = TEAMS[0]?.id;
+                } catch { sessionStorage.removeItem('ys_session'); }
+            }
+
+            const weekEl = document.getElementById('week-display');
+            if (weekEl) weekEl.textContent = currentWeekId;
+
+            renderDayTabs();
+            updateHeader();
+            renderTeamSelectors();
+            renderAdminSection();
+            setupSideTabs();
+            setupFixedForm();
+
+            // Event listeners
+            document.getElementById('login-form')?.addEventListener('submit', handleLoginSubmit);
+            document.getElementById('close-login-modal')?.addEventListener('click', () => { if (currentUser) hideModal('login-modal'); });
+            document.getElementById('btn-export')?.addEventListener('click', exportCurrentExcel);
+            document.getElementById('btn-reset')?.addEventListener('click', weeklyReset);
+            document.getElementById('btn-add-fixed')?.addEventListener('click', () => showModal('fixed-schedule-modal'));
+            document.getElementById('close-fixed-modal')?.addEventListener('click', () => hideModal('fixed-schedule-modal'));
+            document.getElementById('btn-archive')?.addEventListener('click', openArchiveViewer);
+            document.getElementById('close-archive-modal')?.addEventListener('click', () => hideModal('archive-modal'));
+            document.getElementById('archive-week-sel')?.addEventListener('change', e => { if (e.target.value) loadArchiveData(e.target.value); });
+            document.getElementById('close-demo-banner')?.addEventListener('click', () => document.getElementById('demo-banner')?.remove());
+
+            if (!currentUser) setTimeout(() => showModal('login-modal'), 400);
+
+            await initData();
+            lucide.createIcons();
+            if (IS_DEMO_MODE) document.getElementById('demo-banner')?.classList.remove('hidden');
+        }
+
+        window.addEventListener('DOMContentLoaded', initApp);
+    </script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@400;500;600;700&display=swap');
+
+        body {
+            font-family: 'Pretendard', 'Apple SD Gothic Neo', sans-serif;
+        }
+
+        .scrollbar-thin::-webkit-scrollbar {
+            width: 4px;
+            height: 4px;
+        }
+
+        .scrollbar-thin::-webkit-scrollbar-track {
+            background: #f1f5f9;
+        }
+
+        .scrollbar-thin::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 10px;
+        }
+
+        .table-scroll::-webkit-scrollbar {
+            height: 5px;
+        }
+
+        .table-scroll::-webkit-scrollbar-track {
+            background: #f1f5f9;
+        }
+
+        .table-scroll::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 3px;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .animate-spin {
+            animation: spin 1s linear infinite;
+        }
+
+        .animate-pulse {
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1
+            }
+
+            50% {
+                opacity: .5
+            }
+        }
+
+        #toast {
+            transition: all 0.3s cubic-bezier(.4, 0, .2, 1);
+        }
+    </style>
+</head>
+
+<body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col">
+
+    <!-- Demo Banner -->
+    <div id="demo-banner"
+        class="hidden bg-gradient-to-r from-amber-500 to-orange-500 text-white px-4 py-2 text-center text-xs font-semibold relative z-50">
+        ⚠️ 데모 모드 — 데이터가 저장되지 않습니다. Firebase 연결 방법은 README.md를 확인하세요.
+        &nbsp;|&nbsp; 테스트 계정: <code class="bg-white/20 px-1.5 py-0.5 rounded">admin / youthnaroo2026!</code>
+        <button id="close-demo-banner"
+            class="absolute right-3 top-1/2 -translate-y-1/2 hover:opacity-70 transition-opacity">✕</button>
+    </div>
+
+    <!-- Header -->
+    <header
+        class="bg-white/95 backdrop-blur-sm border-b border-slate-200 py-3 px-4 md:px-6 sticky top-0 z-40 shadow-sm">
+        <div class="max-w-[1700px] mx-auto flex items-center justify-between gap-3">
+            <div class="flex items-center gap-3">
+                <div
+                    class="bg-gradient-to-br from-teal-500 to-teal-600 text-white p-2 rounded-xl shadow-sm flex-shrink-0">
+                    <i data-lucide="calendar-range" class="w-5 h-5"></i>
+                </div>
+                <div>
+                    <h1 class="text-base md:text-lg font-bold text-slate-900 leading-tight">유스나루 활동단 공간 예약</h1>
+                    <p class="text-[10px] text-slate-400 hidden sm:block">서울시립마포청소년센터 · 실시간 활동실 예약 시스템 v2</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-2">
+                <div class="hidden md:flex items-center gap-1.5 bg-slate-100 px-2.5 py-1.5 rounded-lg">
+                    <i data-lucide="calendar-days" class="w-3.5 h-3.5 text-slate-500"></i>
+                    <span class="text-xs font-semibold text-slate-600" id="week-display">-</span>
+                </div>
+                <button id="btn-archive"
+                    class="flex items-center gap-1.5 text-xs font-semibold text-violet-700 bg-violet-50 hover:bg-violet-100 border border-violet-200 px-2.5 py-1.5 rounded-lg transition-all">
+                    <i data-lucide="history" class="w-3.5 h-3.5"></i>
+                    <span class="hidden sm:inline">과거 기록</span>
+                </button>
+                <button id="btn-export"
+                    class="flex items-center gap-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2.5 py-1.5 rounded-lg transition-all">
+                    <i data-lucide="download" class="w-3.5 h-3.5"></i>
+                    <span class="hidden sm:inline">엑셀 저장</span>
+                </button>
+                <div id="header-user"></div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main -->
+    <main class="flex-grow max-w-[1700px] w-full mx-auto p-3 md:p-5 flex flex-col xl:flex-row gap-4">
+
+        <!-- Left: Schedule Grid -->
+        <div
+            class="flex-grow bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col min-w-0">
+            <!-- Day Tabs -->
+            <div class="bg-slate-100 p-2 border-b border-slate-200">
+                <div id="day-tabs" class="flex gap-1"></div>
+            </div>
+
+            <!-- Table -->
+            <div class="flex-grow overflow-auto table-scroll">
+                <table class="w-full border-collapse text-left" style="min-width: 900px;">
+                    <thead class="sticky top-0 z-20 bg-white">
+                        <tr class="border-b border-slate-200">
+                            <th
+                                class="py-2 px-3 text-center text-[10px] font-bold text-slate-400 border-r border-slate-200 w-16 bg-slate-50">
+                                시간</th>
+                            <th colspan="2"
+                                class="py-2 px-3 text-center text-[10px] font-bold text-teal-700 border-r-2 border-slate-300 bg-teal-50/80">
+                                🏊 지하 1층</th>
+                            <th colspan="4"
+                                class="py-2 px-3 text-center text-[10px] font-bold text-sky-700 border-r-2 border-slate-300 bg-sky-50/80">
+                                🏢 1층</th>
+                            <th colspan="3"
+                                class="py-2 px-3 text-center text-[10px] font-bold text-indigo-700 border-r-2 border-slate-300 bg-indigo-50/80">
+                                📺 2층</th>
+                            <th colspan="1"
+                                class="py-2 px-3 text-center text-[10px] font-bold text-purple-700 bg-purple-50/80">🏀
+                                3층</th>
+                        </tr>
+                        <tr class="bg-slate-50 border-b-2 border-slate-200 text-center">
+                            <th
+                                class="py-2 px-1 text-[10px] font-bold text-slate-400 border-r border-slate-200 bg-slate-100 w-16">
+                                구분</th>
+                            <th
+                                class="py-2 px-1 text-[10px] font-bold text-slate-600 border-r border-slate-100 bg-teal-50/40 min-w-[90px]">
+                                수영장</th>
+                            <th
+                                class="py-2 px-1 text-[10px] font-bold text-slate-600 border-r-2 border-slate-300 bg-teal-50/40 min-w-[90px]">
+                                소리나루</th>
+                            <th
+                                class="py-2 px-1 text-[10px] font-bold text-slate-600 border-r border-slate-100 bg-sky-50/30 min-w-[90px]">
+                                나루지기실</th>
+                            <th
+                                class="py-2 px-1 text-[10px] font-bold text-slate-600 border-r border-slate-100 bg-sky-50/30 min-w-[90px]">
+                                콤마스튜디오</th>
+                            <th
+                                class="py-2 px-1 text-[10px] font-bold text-slate-600 border-r border-slate-100 bg-sky-50/30 min-w-[90px]">
+                                꿈나루실<br><span class="text-[8px] text-slate-400 font-normal">(멀티미디어)</span></th>
+                            <th
+                                class="py-2 px-1 text-[10px] font-bold text-slate-600 border-r-2 border-slate-300 bg-sky-50/30 min-w-[90px]">
+                                링키실</th>
+                            <th
+                                class="py-2 px-1 text-[10px] font-bold text-slate-600 border-r border-slate-100 bg-indigo-50/30 min-w-[90px]">
+                                방송미디어나루</th>
+                            <th
+                                class="py-2 px-1 text-[10px] font-bold text-slate-600 border-r border-slate-100 bg-indigo-50/30 min-w-[90px]">
+                                스튜디오M</th>
+                            <th
+                                class="py-2 px-1 text-[10px] font-bold text-slate-600 border-r-2 border-slate-300 bg-indigo-50/30 min-w-[90px]">
+                                스튜디오H</th>
+                            <th class="py-2 px-1 text-[10px] font-bold text-slate-600 bg-purple-50/30 min-w-[90px]">체육관
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody id="schedule-body"></tbody>
+                </table>
+            </div>
+
+            <!-- Bottom Bar -->
+            <div
+                class="bg-slate-50 border-t border-slate-200 px-4 py-2 flex items-center justify-between gap-3 flex-wrap">
+                <div class="flex items-center gap-4">
+                    <div class="flex items-center gap-1.5 text-[10px] text-slate-400">
+                        <span
+                            class="inline-block w-3 h-3 rounded border-2 border-dashed border-slate-300"></span><span>예약
+                            가능</span>
+                    </div>
+                    <div class="flex items-center gap-1.5 text-[10px] text-slate-400">
+                        <span class="text-[10px]">🔒</span><span>고정 일정 (관리자)</span>
+                    </div>
+                </div>
+                <div class="flex items-center gap-1.5 text-[10px]">
+                    <i data-lucide="zap" class="w-3 h-3 text-teal-500"></i>
+                    <span class="text-teal-600 font-semibold">실시간 동기화</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right: Side Panel -->
+        <div class="w-full xl:w-72 2xl:w-80 flex-shrink-0 flex flex-col gap-3">
+
+            <!-- Side Tabs -->
+            <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                <div class="flex border-b border-slate-100">
+                    <button id="tab-teams"
+                        class="flex-1 py-2.5 px-1 text-[11px] font-bold border-b-2 border-teal-500 text-teal-600 flex items-center justify-center gap-1 transition-all">
+                        <i data-lucide="users" class="w-3.5 h-3.5"></i> 활동단
+                    </button>
+                    <button id="tab-admin-side"
+                        class="flex-1 py-2.5 px-1 text-[11px] font-bold border-b-2 border-transparent text-slate-500 flex items-center justify-center gap-1 transition-all">
+                        <i data-lucide="shield" class="w-3.5 h-3.5"></i> 관리자
+                    </button>
+                    <button id="tab-logs-side"
+                        class="flex-1 py-2.5 px-1 text-[11px] font-bold border-b-2 border-transparent text-slate-500 flex items-center justify-center gap-1 transition-all">
+                        <i data-lucide="activity" class="w-3.5 h-3.5"></i> 로그
+                    </button>
+                </div>
+
+                <!-- Teams Panel -->
+                <div id="panel-teams" class="p-3">
+                    <p class="text-[10px] text-slate-400 mb-2 font-medium">활동단 선택 후 빈 칸 클릭으로 예약</p>
+                    <div id="team-selectors"
+                        class="flex flex-col gap-1.5 max-h-[420px] overflow-y-auto scrollbar-thin pr-0.5"></div>
+                </div>
+
+                <!-- Admin Panel -->
+                <div id="panel-admin-side" class="hidden p-3">
+                    <div id="admin-section" class="hidden flex flex-col gap-2">
+                        <a href="admin.html"
+                            class="w-full flex items-center gap-2 justify-center py-2.5 px-3 bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-700 text-xs font-bold rounded-xl transition-all">
+                            <i data-lucide="shield" class="w-4 h-4"></i> 관리자 페이지 열기 →
+                        </a>
+                        <button id="btn-add-fixed"
+                            class="w-full flex items-center gap-2 justify-center py-2 px-3 bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 text-xs font-semibold rounded-xl transition-all">
+                            <i data-lucide="pin" class="w-3.5 h-3.5"></i> 고정 일정 추가
+                        </button>
+                        <button id="btn-reset"
+                            class="w-full flex items-center gap-2 justify-center py-2 px-3 bg-red-50 hover:bg-red-100 border border-red-200 text-red-600 text-xs font-semibold rounded-xl transition-all">
+                            <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> 주간 리셋
+                        </button>
+                        <div
+                            class="bg-amber-50 border border-amber-200 rounded-xl p-2.5 text-[10px] text-amber-700 leading-relaxed">
+                            <p class="font-bold mb-1">⚠️ 관리자 안내</p>
+                            <ul class="space-y-0.5 list-disc list-inside">
+                                <li>모든 행동이 활동 로그에 기록됩니다</li>
+                                <li>주간 리셋: 일반 예약만 삭제, 고정 유지</li>
+                                <li>상세 관리는 관리자 페이지에서</li>
+                            </ul>
+                        </div>
+                    </div>
+                    <div id="admin-locked" class="text-center py-10 text-slate-400">
+                        <i data-lucide="lock" class="w-10 h-10 mx-auto mb-3 opacity-20"></i>
+                        <p class="text-xs font-medium">관리자 로그인 필요</p>
+                    </div>
+                </div>
+
+                <!-- Logs Panel -->
+                <div id="panel-logs-side" class="hidden p-3">
+                    <div id="side-logs-list" class="flex flex-col gap-1.5 max-h-[420px] overflow-y-auto scrollbar-thin">
+                        <div class="text-center py-6 text-slate-400">
+                            <i data-lucide="activity" class="w-6 h-6 mx-auto mb-2 opacity-30"></i>
+                            <p class="text-xs">탭 클릭 시 최근 활동 로드</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Floor Legend -->
+            <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-3">
+                <h3 class="text-[11px] font-bold text-slate-700 mb-2 flex items-center gap-1.5">
+                    <i data-lucide="map" class="w-3.5 h-3.5 text-slate-400"></i> 공간 분류
+                </h3>
+                <div class="space-y-1.5 text-[10px]">
+                    <div class="flex items-start gap-2"><span
+                            class="w-3 h-3 rounded bg-teal-100 border border-teal-300 flex-shrink-0 mt-0.5"></span>
+                        <div><strong class="text-teal-800">지하 1층</strong><span class="text-slate-500 ml-1">수영장,
+                                소리나루</span></div>
+                    </div>
+                    <div class="flex items-start gap-2"><span
+                            class="w-3 h-3 rounded bg-sky-100 border border-sky-300 flex-shrink-0 mt-0.5"></span>
+                        <div><strong class="text-sky-800">1층</strong><span class="text-slate-500 ml-1">나루지기실, 콤마스튜디오,
+                                꿈나루실, 링키실</span></div>
+                    </div>
+                    <div class="flex items-start gap-2"><span
+                            class="w-3 h-3 rounded bg-indigo-100 border border-indigo-300 flex-shrink-0 mt-0.5"></span>
+                        <div><strong class="text-indigo-800">2층</strong><span class="text-slate-500 ml-1">방송미디어나루,
+                                스튜디오M, 스튜디오H</span></div>
+                    </div>
+                    <div class="flex items-start gap-2"><span
+                            class="w-3 h-3 rounded bg-purple-100 border border-purple-300 flex-shrink-0 mt-0.5"></span>
+                        <div><strong class="text-purple-800">3층</strong><span class="text-slate-500 ml-1">체육관</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Team Color Legend -->
+            <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-3">
+                <h3 class="text-[11px] font-bold text-slate-700 mb-2 flex items-center gap-1.5">
+                    <i data-lucide="palette" class="w-3.5 h-3.5 text-slate-400"></i> 활동단 색상
+                </h3>
+                <div class="grid grid-cols-2 gap-1">
+                    <div class="flex items-center gap-1.5 bg-amber-100 border border-amber-300 rounded-lg px-2 py-1">
+                        <span class="w-2 h-2 rounded-full bg-amber-400"></span><span
+                            class="text-[9px] font-bold text-amber-800">나루지기</span></div>
+                    <div class="flex items-center gap-1.5 bg-sky-100 border border-sky-300 rounded-lg px-2 py-1"><span
+                            class="w-2 h-2 rounded-full bg-sky-400"></span><span
+                            class="text-[9px] font-bold text-sky-800">다힘</span></div>
+                    <div
+                        class="flex items-center gap-1.5 bg-emerald-100 border border-emerald-300 rounded-lg px-2 py-1">
+                        <span class="w-2 h-2 rounded-full bg-emerald-400"></span><span
+                            class="text-[9px] font-bold text-emerald-800">진로스토리</span></div>
+                    <div class="flex items-center gap-1.5 bg-indigo-100 border border-indigo-300 rounded-lg px-2 py-1">
+                        <span class="w-2 h-2 rounded-full bg-indigo-400"></span><span
+                            class="text-[9px] font-bold text-indigo-800">대학생미디어</span></div>
+                    <div class="flex items-center gap-1.5 bg-blue-100 border border-blue-300 rounded-lg px-2 py-1"><span
+                            class="w-2 h-2 rounded-full bg-blue-400"></span><span
+                            class="text-[9px] font-bold text-blue-800">마스코트</span></div>
+                    <div class="flex items-center gap-1.5 bg-cyan-100 border border-cyan-300 rounded-lg px-2 py-1"><span
+                            class="w-2 h-2 rounded-full bg-cyan-400"></span><span
+                            class="text-[9px] font-bold text-cyan-800">물여울</span></div>
+                    <div class="flex items-center gap-1.5 bg-orange-100 border border-orange-300 rounded-lg px-2 py-1">
+                        <span class="w-2 h-2 rounded-full bg-orange-400"></span><span
+                            class="text-[9px] font-bold text-orange-800">하프타임</span></div>
+                    <div class="flex items-center gap-1.5 bg-purple-100 border border-purple-300 rounded-lg px-2 py-1">
+                        <span class="w-2 h-2 rounded-full bg-purple-400"></span><span
+                            class="text-[9px] font-bold text-purple-800">청소년방송국</span></div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <footer class="bg-white border-t border-slate-200 py-3 px-6 text-center text-[10px] text-slate-400">
+        <p>© 2026 서울시립마포청소년센터 유스나루 — 공간 예약 시스템 v2.0</p>
+    </footer>
+
+    <!-- Toast -->
+    <div id="toast"
+        class="fixed bottom-6 left-1/2 -translate-x-1/2 opacity-0 translate-y-4 z-[100] flex items-center gap-2 bg-emerald-600 text-white px-5 py-3 rounded-2xl shadow-2xl text-sm font-semibold max-w-sm w-full pointer-events-none">
+        <i id="toast-icon" data-lucide="check-circle" class="w-4 h-4 flex-shrink-0"></i>
+        <span id="toast-msg">알림</span>
+    </div>
+
+    <!-- ===================== LOGIN MODAL ===================== -->
+    <div id="login-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div class="absolute inset-0 bg-black/50 backdrop-blur-sm"></div>
+        <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm border border-slate-200 overflow-hidden">
+            <!-- Header gradient -->
+            <div class="bg-gradient-to-br from-teal-500 to-teal-600 p-6 text-white">
+                <div class="flex items-center gap-3">
+                    <div class="bg-white/20 p-2 rounded-xl"><i data-lucide="calendar-range" class="w-5 h-5"></i></div>
+                    <div>
+                        <h2 class="text-base font-bold">유스나루 예약 시스템</h2>
+                        <p class="text-xs text-teal-100">아이디와 비밀번호로 로그인하세요</p>
+                    </div>
+                </div>
+            </div>
+            <button id="close-login-modal"
+                class="absolute top-4 right-4 text-white/70 hover:text-white transition-colors">
+                <i data-lucide="x" class="w-5 h-5"></i>
+            </button>
+            <div class="p-6">
+                <form id="login-form" class="flex flex-col gap-4">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1.5 flex items-center gap-1">
+                            <i data-lucide="user" class="w-3 h-3"></i> 아이디
+                        </label>
+                        <input id="login-username" type="text" placeholder="아이디를 입력하세요" required autocomplete="username"
+                            class="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400 focus:border-transparent transition-all placeholder-slate-300">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1.5 flex items-center gap-1">
+                            <i data-lucide="lock" class="w-3 h-3"></i> 비밀번호
+                        </label>
+                        <input id="login-password" type="password" placeholder="비밀번호를 입력하세요" required
+                            autocomplete="current-password"
+                            class="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400 focus:border-transparent transition-all placeholder-slate-300">
+                    </div>
+                    <div id="login-error"
+                        class="hidden bg-red-50 border border-red-200 text-red-600 text-xs px-3 py-2 rounded-xl"></div>
+                    <div
+                        class="bg-slate-50 border border-slate-100 rounded-xl p-3 text-[10px] text-slate-500 leading-relaxed">
+                        <p class="font-semibold text-slate-600 mb-1">📌 로그인 안내</p>
+                        <p>계정이 없는 경우 관리자에게 문의하세요.</p>
+                        <p class="mt-1 text-[9px] text-slate-400">데모 계정: <code
+                                class="bg-slate-200 px-1 rounded">admin / youthnaroo2026!</code></p>
+                    </div>
+                    <button id="login-submit-btn" type="submit"
+                        class="w-full bg-gradient-to-r from-teal-500 to-teal-600 hover:from-teal-600 hover:to-teal-700 text-white font-bold py-3 rounded-xl transition-all shadow-sm hover:shadow-md text-sm">
+                        <span class="flex items-center gap-2 justify-center"><i data-lucide="log-in"
+                                class="w-4 h-4"></i> 로그인</span>
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===================== FIXED SCHEDULE MODAL ===================== -->
+    <div id="fixed-schedule-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div class="absolute inset-0 bg-black/50 backdrop-blur-sm"
+            onclick="document.getElementById('fixed-schedule-modal').classList.add('hidden')"></div>
+        <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-md border border-slate-200">
+            <button id="close-fixed-modal"
+                class="absolute top-4 right-4 text-slate-400 hover:text-slate-600 transition-colors">
+                <i data-lucide="x" class="w-5 h-5"></i>
+            </button>
+            <div class="p-6">
+                <div class="flex items-center gap-3 mb-5">
+                    <div class="bg-blue-100 text-blue-600 p-2.5 rounded-xl"><i data-lucide="pin" class="w-5 h-5"></i>
+                    </div>
+                    <div>
+                        <h2 class="text-base font-bold text-slate-900">고정 일정 추가</h2>
+                        <p class="text-xs text-slate-400">관리자 전용 · 시간 범위 설정</p>
+                    </div>
+                </div>
+                <form id="fixed-schedule-form" class="flex flex-col gap-3">
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-600 mb-1">활동단 <span
+                                    class="text-red-400">*</span></label>
+                            <select id="fs-team" required
+                                class="w-full px-2.5 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white"></select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-600 mb-1">요일 <span
+                                    class="text-red-400">*</span></label>
+                            <select id="fs-day" required
+                                class="w-full px-2.5 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white"></select>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">장소 <span
+                                class="text-red-400">*</span></label>
+                        <select id="fs-room" required
+                            class="w-full px-2.5 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white"></select>
+                    </div>
+                    <!-- Time range -->
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">시간 범위 <span
+                                class="text-red-400">*</span></label>
+                        <div class="flex items-center gap-2">
+                            <select id="fs-start-hour" required
+                                class="flex-1 px-2.5 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white"></select>
+                            <span class="text-sm font-bold text-slate-400">~</span>
+                            <select id="fs-end-hour" required
+                                class="flex-1 px-2.5 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white"></select>
+                        </div>
+                        <p class="text-[9px] text-slate-400 mt-1.5 bg-blue-50 px-2 py-1 rounded-lg">💡 예: 14:00 ~ 17:00
+                            → 14시, 15시, 16시 슬롯 자동 고정</p>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">메모 (선택)</label>
+                        <input id="fs-note" type="text" placeholder="예: 매주 고정, 2·4주 고정 등"
+                            class="w-full px-2.5 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 placeholder-slate-300">
+                    </div>
+                    <button type="submit"
+                        class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded-xl transition-all text-sm flex items-center justify-center gap-2 mt-1 shadow-sm">
+                        <i data-lucide="pin" class="w-4 h-4"></i> 고정 일정 추가
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===================== ARCHIVE VIEWER MODAL ===================== -->
+    <div id="archive-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div class="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onclick="document.getElementById('archive-modal').classList.add('hidden')"></div>
+        <div
+            class="relative bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[88vh] flex flex-col border border-slate-200">
+            <div class="flex items-center justify-between p-5 border-b border-slate-200 flex-shrink-0">
+                <div class="flex items-center gap-3">
+                    <div class="bg-violet-100 text-violet-600 p-2.5 rounded-xl"><i data-lucide="history"
+                            class="w-5 h-5"></i></div>
+                    <div>
+                        <h2 class="text-base font-bold text-slate-900">과거 기록 조회</h2>
+                        <p class="text-xs text-slate-400">주간 리셋 후 보관된 예약 이력을 확인합니다</p>
+                    </div>
+                </div>
+                <button id="close-archive-modal" class="text-slate-400 hover:text-slate-600 transition-colors">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+            <div class="p-4 border-b border-slate-100 flex-shrink-0 flex items-center gap-3 bg-slate-50">
+                <label class="text-xs font-semibold text-slate-600 flex-shrink-0 flex items-center gap-1">
+                    <i data-lucide="calendar-search" class="w-3.5 h-3.5 text-slate-400"></i> 주차 선택
+                </label>
+                <select id="archive-week-sel"
+                    class="px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-400 bg-white min-w-[180px]">
+                    <option value="">주차를 선택하세요</option>
+                </select>
+            </div>
+            <div id="archive-content" class="flex-grow overflow-auto p-5">
+                <div class="text-center py-16 text-slate-400">
+                    <i data-lucide="calendar-x" class="w-12 h-12 mx-auto mb-4 opacity-20"></i>
+                    <p class="text-sm font-medium">위에서 주차를 선택하면 해당 기록이 표시됩니다</p>
+                    <p class="text-xs mt-1 text-slate-300">주간 리셋을 실행하면 과거 기록이 생성됩니다</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            if (typeof lucide !== 'undefined') lucide.createIcons();
+        });
+        // Fix login error display
+        document.addEventListener('DOMContentLoaded', () => {
+            const errEl = document.getElementById('login-error');
+            if (errEl) {
+                const observer = new MutationObserver(() => {
+                    if (!errEl.classList.contains('hidden') && errEl.querySelector('span')) {
+                        const msgEl = document.getElementById('login-error');
+                        // already handled
+                    }
+                });
+            }
+        });
+    </script>
+</body>
+
+</html>
