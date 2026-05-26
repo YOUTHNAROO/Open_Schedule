@@ -1,0 +1,13 @@
+{
+  "name": "youthnaroo-schedule",
+  "version": "2.0.0",
+  "description": "유스나루 활동단 공간 예약 시스템",
+  "main": "index.html",
+  "scripts": {
+    "copy-files": "cp index.html admin.html firebase-config.js favicon.png favicon.ico apple-touch-icon.png public/",
+    "deploy": "npm run copy-files && firebase deploy"
+  },
+  "keywords": [],
+  "author": "minu@youthnaroo.or.kr",
+  "license": "ISC"
+}
