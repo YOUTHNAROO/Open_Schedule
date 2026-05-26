@@ -125,6 +125,14 @@
       return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
     }
     function getTeam(id) { return TEAMS.find(t => t.id === id) || null; }
+    function getWeekId(date) {
+      const d = new Date(date);
+      d.setHours(0, 0, 0, 0);
+      d.setDate(d.getDate() + 3 - (d.getDay() + 6) % 7);
+      const week1 = new Date(d.getFullYear(), 0, 4);
+      const wn = 1 + Math.round(((d - week1) / 864e5 - 3 + (week1.getDay() + 6) % 7) / 7);
+      return `${d.getFullYear()}-W${String(wn).padStart(2, '0')}`;
+    }
     function isSuperAdmin() { return currentUser?.role === 'superadmin'; }
     function isAdminOrSuper() { return currentUser && (currentUser.role === 'admin' || currentUser.role === 'superadmin'); }
     function esc(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
@@ -906,11 +914,12 @@
             
             showToast('웹 예약 데이터 일괄 업데이트 중...', 'info');
             
+            const currentWeekId = getWeekId(new Date());
             const daysToSync = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
             
             // 1. 기존 예약을 요일별로 삭제
             for (const dId of daysToSync) {
-              const colRef = collection(db, `reservations/current_week/${dId}`);
+              const colRef = collection(db, `reservations/${currentWeekId}/${dId}`);
               const snap = await getDocs(colRef);
               const batch = writeBatch(db);
               snap.forEach(docSnap => {
@@ -932,8 +941,8 @@
               const batch = writeBatch(db);
               const list = reservationsByDay[dId];
               list.forEach(r => {
-                const key = `${r.time}-${r.room}`;
-                const docRef = doc(db, `reservations/current_week/${dId}`, key);
+                const key = `${r.time}-${r.room}`.replace(/\//g, '_');
+                const docRef = doc(db, `reservations/${currentWeekId}/${dId}`, key);
                 
                 const matchedTeam = TEAMS.find(t => t.name === r.teamName);
                 const teamId = matchedTeam ? matchedTeam.id : 'external';

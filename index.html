@@ -125,7 +125,8 @@
             dayFixedList.forEach(fs => {
                 const hours = expandHourRange(fs.startHour, fs.endHour);
                 hours.forEach(h => {
-                    merged[`${h}-${fs.room}`] = {
+                    const key = `${h}-${fs.room}`.replace(/\//g, '_');
+                    merged[key] = {
                         teamId: fs.teamId,
                         teamName: fs.teamName,
                         userName: '고정 일정',
@@ -400,7 +401,7 @@
         async function makeReservation(hour, room) {
             if (!currentUser) { showToast('로그인이 필요합니다.', 'error'); return; }
             if (!selectedTeamId) { showToast('활동단을 선택해주세요.', 'error'); return; }
-            const key = `${hour}-${room}`;
+            const key = `${hour}-${room}`.replace(/\//g, '_');
             if (reservations[key]) { showToast('이미 예약된 시간대입니다.', 'error'); return; }
             const team = getTeam(selectedTeamId);
             if (!team) return;
@@ -431,7 +432,7 @@
         }
 
         async function cancelReservation(hour, room) {
-            const key = `${hour}-${room}`;
+            const key = `${hour}-${room}`.replace(/\//g, '_');
             const existing = reservations[key];
             if (!existing || !currentUser) return;
             if (existing.isFixed && !isAdmin()) { showToast('고정 일정은 관리자만 취소할 수 있습니다.', 'error'); return; }
@@ -549,7 +550,7 @@
                 const hasData = Object.keys(dd).length > 0;
                 html += `<div class="mb-5"><h4 class="text-xs font-bold text-slate-600 mb-2 flex items-center gap-1.5"><span class="w-2 h-2 rounded-full ${day.color} inline-block"></span>${day.fullLabel} ${hasData ? `<span class="text-[10px] font-normal text-slate-400">(${Object.keys(dd).length}건)</span>` : '<span class="text-[10px] text-slate-300">예약 없음</span>'}</h4>`;
                 if (hasData) {
-                    html += `<div class="overflow-x-auto"><table class="w-full border-collapse text-[10px]" style="min-width:800px"><thead><tr class="bg-slate-100 border border-slate-200"><th class="py-1.5 px-2 border border-slate-200 font-bold text-slate-500 w-14">시간</th>${ALL_ROOMS.map(r => `<th class="py-1.5 px-2 border border-slate-200 font-bold text-slate-600 min-w-[75px]">${r}</th>`).join('')}</tr></thead><tbody>${HOURS.map(hour => { const row = `<tr class="border border-slate-100"><td class="py-1.5 px-2 border border-slate-200 font-bold text-slate-500 bg-slate-50">${hour}</td>${ALL_ROOMS.map(room => { const key = `${hour}-${room}`; const res = dd[key]; if (res) { const t = getTeam(res.teamId); return `<td class="py-1.5 px-2 border border-slate-200"><span class="px-1.5 py-0.5 rounded text-[9px] font-bold ${t ? `${t.bg} ${t.text}` : 'bg-slate-100 text-slate-600'}">${res.teamName}${res.isFixed ? ' 🔒' : ''}</span></td>`; } return `<td class="py-1.5 px-2 border border-slate-200 text-slate-200 text-center">·</td>` }).join('')}</tr>`; return row }).join('')}</tbody></table></div>`;
+                    html += `<div class="overflow-x-auto"><table class="w-full border-collapse text-[10px]" style="min-width:800px"><thead><tr class="bg-slate-100 border border-slate-200"><th class="py-1.5 px-2 border border-slate-200 font-bold text-slate-500 w-14">시간</th>${ALL_ROOMS.map(r => `<th class="py-1.5 px-2 border border-slate-200 font-bold text-slate-600 min-w-[75px]">${r}</th>`).join('')}</tr></thead><tbody>${HOURS.map(hour => { const row = `<tr class="border border-slate-100"><td class="py-1.5 px-2 border border-slate-200 font-bold text-slate-500 bg-slate-50">${hour}</td>${ALL_ROOMS.map(room => { const key = `${hour}-${room}`.replace(/\//g, '_'); const res = dd[key]; if (res) { const t = getTeam(res.teamId); return `<td class="py-1.5 px-2 border border-slate-200"><span class="px-1.5 py-0.5 rounded text-[9px] font-bold ${t ? `${t.bg} ${t.text}` : 'bg-slate-100 text-slate-600'}">${res.teamName}${res.isFixed ? ' 🔒' : ''}</span></td>`; } return `<td class="py-1.5 px-2 border border-slate-200 text-slate-200 text-center">·</td>` }).join('')}</tr>`; return row }).join('')}</tbody></table></div>`;
                 }
                 html += `</div>`;
             });
@@ -567,7 +568,7 @@
                 DAYS.forEach(day => {
                     const dd = data[day.id] || {};
                     const rows = [['시간', ...ALL_ROOMS]];
-                    HOURS.forEach(h => { rows.push([h, ...ALL_ROOMS.map(r => { const res = dd[`${h}-${r}`]; return res ? `${res.teamName}${res.isFixed ? ' (고정)' : ''}` : ''; })]); });
+                    HOURS.forEach(h => { rows.push([h, ...ALL_ROOMS.map(r => { const res = dd[`${h}-${r}`.replace(/\//g, '_')]; return res ? `${res.teamName}${res.isFixed ? ' (고정)' : ''}` : ''; })]); });
                     const ws = XLSX.utils.aoa_to_sheet(rows);
                     ws['!cols'] = [{ wch: 8 }, ...ALL_ROOMS.map(() => ({ wch: 14 }))];
                     XLSX.utils.book_append_sheet(wb, ws, day.fullLabel);
@@ -588,7 +589,7 @@
                     const df = fixedSchedules.filter(fs => fs.day === day.id);
                     const merged = buildMergedReservations(dd, df);
                     const rows = [['시간', ...ALL_ROOMS]];
-                    HOURS.forEach(h => { rows.push([h, ...ALL_ROOMS.map(r => { const res = merged[`${h}-${r}`]; return res ? `${res.teamName}${res.isFixed ? ' (고정)' : ''}` : ''; })]); });
+                    HOURS.forEach(h => { rows.push([h, ...ALL_ROOMS.map(r => { const res = merged[`${h}-${r}`.replace(/\//g, '_')]; return res ? `${res.teamName}${res.isFixed ? ' (고정)' : ''}` : ''; })]); });
                     const ws = XLSX.utils.aoa_to_sheet(rows);
                     ws['!cols'] = [{ wch: 8 }, ...ALL_ROOMS.map(() => ({ wch: 14 }))];
                     XLSX.utils.book_append_sheet(wb, ws, day.fullLabel);
@@ -664,7 +665,7 @@
                     const isLast = floor && floor.rooms[floor.rooms.length - 1] === room;
                     const td = document.createElement('td');
                     td.className = `p-1 ${isLast ? 'border-r-2 border-slate-300' : 'border-r border-slate-100'} relative min-w-[90px]`;
-                    const key = `${hour}-${room}`;
+                    const key = `${hour}-${room}`.replace(/\//g, '_');
                     const res = reservations[key];
                     if (res) {
                         const team = getTeam(res.teamId);

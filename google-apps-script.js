@@ -356,7 +356,7 @@ function onEdit(e) {
   }
   
   // 병합된 모든 개별 셀의 예약 상태를 Firestore에 순차 갱신 (병합 셀 일괄 동기화)
-  var weekId = "current_week";
+  var weekId = getWeekId(new Date());
   var dayId = getDayId(day);
   
   for (var currR = startRow; currR < startRow + numRows; currR++) {
@@ -366,7 +366,7 @@ function onEdit(e) {
       if (!curRoom || curTime.indexOf(":") === -1 || curTime.indexOf("~") === -1) continue;
       curRoom = curRoom.split("(")[0].trim();
       
-      var resId = curTime + "-" + curRoom;
+      var resId = (curTime + "-" + curRoom).replace(/\//g, "_");
       var url = "https://firestore.googleapis.com/v1/projects/" + PROJECT_ID + "/databases/(default)/documents/reservations/" + weekId + "/" + dayId + "/" + resId;
       
       var options = {
@@ -439,4 +439,14 @@ function getActiveTabFromFirebase() {
     }
   } catch(e) {}
   return null;
+}
+
+// 주간 ID 생성 헬퍼 함수
+function getWeekId(date) {
+  var d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() + 3 - (d.getDay() + 6) % 7);
+  var week1 = new Date(d.getFullYear(), 0, 4);
+  var wn = 1 + Math.round(((d - week1) / 864e5 - 3 + (week1.getDay() + 6) % 7) / 7);
+  return d.getFullYear() + "-W" + ("0" + wn).slice(-2);
 }
