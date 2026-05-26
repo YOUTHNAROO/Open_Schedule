@@ -669,14 +669,32 @@
                     if (res) {
                         const team = getTeam(res.teamId);
                         const canCancel = currentUser && (isAdmin() || (currentUser.allowedTeams || []).includes(res.teamId)) && (!res.isFixed || isAdmin());
-                        const titleAttr = `${res.teamName}${res.isFixed ? ' [고정]' : ''}\n예약자: ${res.userName || ''}${res.note ? `\n메모: ${res.note}` : ''}`;
-                        td.innerHTML = `<div class="w-full min-h-[46px] flex flex-col justify-center items-center px-0.5 py-1 rounded-lg border-2 shadow-sm relative group ${team ? `${team.bg} ${team.text} ${team.border}` : 'bg-slate-100 text-slate-600 border-slate-300'} ${res.isFixed ? 'ring-1 ring-current/20 shadow-md' : ''}" title="${esc(titleAttr)}">
+                        
+                        let displayName = res.teamName;
+                        if (team && team.shortName) {
+                            displayName = team.shortName;
+                        } else if (!team) {
+                            if (displayName.length > 5) {
+                                displayName = displayName.slice(0, 4) + '..';
+                            }
+                        }
+
+                        let cardClass = '';
+                        if (team) {
+                            cardClass = `${team.bg} ${team.text} ${team.border}`;
+                        } else {
+                            cardClass = 'bg-slate-50 text-slate-500 border-slate-200';
+                        }
+
+                        const titleAttr = `${res.teamName}${res.isFixed ? ' [고정]' : ''}\n분류: ${team ? (team.fullType || '활동단') : '기타(정규 시간표)'}\n예약자: ${res.userName || ''}${res.note ? `\n메모: ${res.note}` : ''}`;
+                        
+                        td.innerHTML = `<div class="w-full min-h-[46px] flex flex-col justify-center items-center px-0.5 py-1 rounded-lg border-2 shadow-sm relative group ${cardClass} ${res.isFixed ? 'ring-1 ring-current/20 shadow-md' : ''}" title="${esc(titleAttr)}">
                             <span class="absolute top-0.5 right-0.5 text-[9px] flex items-center gap-0.5 leading-none">
                                 ${res.isFixed ? '🔒' : ''}
                                 ${res.note ? '<i data-lucide="message-square" class="w-2.5 h-2.5 opacity-60"></i>' : ''}
                             </span>
-                            <span class="text-[9px] font-bold text-center w-full break-all leading-tight px-0.5">${res.teamName}</span>
-                            <span class="text-[8px] opacity-50 mt-0.5 break-all w-full text-center px-0.5 leading-tight">${res.userName || ''}</span>
+                            <span class="text-[9px] font-bold text-center w-full break-all leading-tight px-0.5">${esc(displayName)}</span>
+                            <span class="text-[8px] opacity-50 mt-0.5 break-all w-full text-center px-0.5 leading-tight">${esc(res.userName || '')}</span>
                             ${canCancel ? `<button onclick="handleCancelClick('${hour}','${room}')" class="absolute inset-0 w-full h-full rounded-lg opacity-0 group-hover:opacity-100 bg-black/15 flex items-center justify-center transition-all" title="예약 취소"><i data-lucide="x-circle" class="w-5 h-5 text-white drop-shadow"></i></button>` : ''}
                         </div>`;
                     } else {

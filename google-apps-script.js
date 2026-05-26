@@ -1,5 +1,5 @@
 /**
- * 마포청소년센터 유스나루 예약 시스템 - 구글 스프레드시트 연동 Apps Script
+ * 마포청소년센터 유스나루 예약 시스템 - 구글 스프레드시트 연동 Apps Script (고도화 버전)
  * 
  * ⚠️ 적용 방법:
  * 1. 연동할 구글 스프레드시트에서 [확장 프로그램] -> [Apps Script]로 진입합니다.
@@ -22,7 +22,6 @@ function doPost(e) {
   try {
     var params = e.parameter;
     if (!params.action || !params.day || !params.time || !params.room) {
-      // JSON payload로 왔을 경우 파싱 시도
       if (e.postData && e.postData.contents) {
         params = JSON.parse(e.postData.contents);
       }
@@ -44,7 +43,6 @@ function doPost(e) {
         .setMimeType(ContentService.MimeType.JSON);
     }
     
-    // 시트에서 요일 영역 찾기
     var lastRow = sheet.getLastRow();
     var lastColumn = sheet.getLastColumn();
     var data = sheet.getRange(1, 1, lastRow, lastColumn).getValues();
@@ -52,15 +50,13 @@ function doPost(e) {
     var startRowIdx = -1;
     var endRowIdx = -1;
     
-    // 1. 해당 요일의 시작 행과 끝 행 범위 탐색
+    // 요일 범위 찾기
     for (var i = 0; i < data.length; i++) {
       var rowStr = data[i].join(" ");
       if (rowStr.indexOf(day) !== -1) {
-        startRowIdx = i + 1; // 1-indexed row number
-        // 다음 요일 시작 부분을 찾기 전까지 범위를 잡음
+        startRowIdx = i + 1;
         for (var j = i + 1; j < data.length; j++) {
           var nextRowStr = data[j].join(" ");
-          // '요일' 단어가 행에 들어있고, 그것이 헤더성 구분자일 경우
           if (nextRowStr.indexOf("요일") !== -1 && (nextRowStr.indexOf("년") !== -1 || nextRowStr.indexOf("월") !== -1)) {
             endRowIdx = j;
             break;
@@ -76,18 +72,16 @@ function doPost(e) {
         .setMimeType(ContentService.MimeType.JSON);
     }
     
-    // 2. 해당 요일 범위 내에서 공간(방) 열(Column) 인덱스 탐색 (방 이름은 요일 구분 행 바로 다음다음 행인 3번째 줄 혹은 헤더 영역에 존재)
+    // 방(Column) 찾기
     var roomColIdx = -1;
-    // startRowIdx 바로 다음 1~3행 내에서 방 이름 열을 찾음
     for (var r = startRowIdx; r < startRowIdx + 4; r++) {
       if (r > lastRow) break;
       var headerRow = data[r - 1];
       for (var c = 0; c < headerRow.length; c++) {
         var cellVal = String(headerRow[c]).replace(/\s+/g, "");
         var targetRoom = room.replace(/\s+/g, "");
-        // 방 이름 매칭 (예: '소리나루(12명)' 안에 '소리나루'가 포함되는지)
         if (cellVal && (cellVal.indexOf(targetRoom) !== -1 || targetRoom.indexOf(cellVal) !== -1)) {
-          roomColIdx = c + 1; // 1-indexed
+          roomColIdx = c + 1;
           break;
         }
       }
@@ -99,10 +93,10 @@ function doPost(e) {
         .setMimeType(ContentService.MimeType.JSON);
     }
     
-    // 3. 해당 요일 범위 내에서 시간(Time) 행(Row) 인덱스 탐색
+    // 시간(Row) 찾기
     var targetRowIdx = -1;
     for (var r = startRowIdx; r <= endRowIdx; r++) {
-      var cellVal = String(data[r - 1][0]).replace(/\s+/g, ""); // A열은 시간대
+      var cellVal = String(data[r - 1][0]).replace(/\s+/g, "");
       var targetTime = time.replace(/\s+/g, "");
       if (cellVal && (cellVal.indexOf(targetTime) !== -1 || targetTime.indexOf(cellVal) !== -1)) {
         targetRowIdx = r;
@@ -115,8 +109,16 @@ function doPost(e) {
         .setMimeType(ContentService.MimeType.JSON);
     }
     
-    // 4. 셀 내용 업데이트
     var cell = sheet.getRange(targetRowIdx, roomColIdx);
+    
+    // 셀 병합 영역 여부 확인 (만약 병합되어 있다면 좌상단 셀을 기준으로 작업)
+    if (cell.isPartOfMerge()) {
+      var mergedRanges = cell.getMergedRanges();
+      if (mergedRanges && mergedRanges.length > 0) {
+        cell = mergedRanges[0].getCell(1, 1);
+      }
+    }
+    
     if (action === "reserve") {
       var displayText = teamName;
       if (userName && userName !== "외부예약") {
@@ -130,7 +132,7 @@ function doPost(e) {
       }
       cell.setValue(displayText);
     } else {
-      cell.clearContent(); // 취소 시 셀 비움
+      cell.clearContent();
     }
     
     return ContentService.createTextOutput(JSON.stringify({ status: "success", info: "시트 연동 완료" }))
@@ -142,9 +144,17 @@ function doPost(e) {
   }
 }
 
-// 웹앱 doGet 호출 시 스프레드시트 데이터 전체를 긁어 정규화된 JSON으로 반환
+// 웹앱 doGet 호출 시 스프레드시트 데이터 반환 (탭 목록 혹은 탭 데이터)
 function doGet(e) {
   try {
+    // 1. 탭 목록 전체 조회 액션 지원
+    if (e.parameter.action === "getTabs") {
+      var sheets = SpreadsheetApp.getActiveSpreadsheet().getSheets();
+      var tabNames = sheets.map(function(s) { return s.getName(); });
+      return ContentService.createTextOutput(JSON.stringify({ tabs: tabNames }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+    
     var activeTabName = e.parameter.activeTabName || getActiveTabFromFirebase() || "2026년 6월";
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var sheet = ss.getSheetByName(activeTabName);
@@ -155,7 +165,27 @@ function doGet(e) {
     
     var lastRow = sheet.getLastRow();
     var lastColumn = sheet.getLastColumn();
-    var data = sheet.getRange(1, 1, lastRow, lastColumn).getValues();
+    var dataRange = sheet.getRange(1, 1, lastRow, lastColumn);
+    var data = dataRange.getValues();
+    
+    // 2. 셀 병합(Merged Cells) 복구: 병합 영역 내 모든 셀에 좌상단 값 채워넣기
+    var mergedRanges = dataRange.getMergedRanges();
+    for (var k = 0; k < mergedRanges.length; k++) {
+      var mRange = mergedRanges[k];
+      var startRow = mRange.getRow();
+      var startCol = mRange.getColumn();
+      var numRows = mRange.getNumRows();
+      var numCols = mRange.getNumColumns();
+      
+      var rootValue = data[startRow - 1][startCol - 1];
+      if (rootValue !== undefined && rootValue !== null) {
+        for (var r = startRow; r < startRow + numRows; r++) {
+          for (var c = startCol; c < startCol + numCols; c++) {
+            data[r - 1][c - 1] = rootValue; // 병합 영역 전체에 좌상단 텍스트 전파
+          }
+        }
+      }
+    }
     
     var result = {
       sheetName: activeTabName,
@@ -164,16 +194,13 @@ function doGet(e) {
     
     var currentDay = "";
     var rooms = [];
-    var dayStartRow = -1;
     
     for (var i = 0; i < data.length; i++) {
       var row = data[i];
       var firstCell = String(row[0]).trim();
       var rowStr = row.join(" ");
       
-      // 요일 구분 행 발견 (예: 2026년 6월 월요일)
       if (rowStr.indexOf("요일") !== -1 && (rowStr.indexOf("년") !== -1 || rowStr.indexOf("월") !== -1)) {
-        // 기존 요일의 방 정보 매칭 행 분석
         currentDay = "";
         if (rowStr.indexOf("월요일") !== -1) currentDay = "월요일";
         else if (rowStr.indexOf("화요일") !== -1) currentDay = "화요일";
@@ -183,10 +210,7 @@ function doGet(e) {
         else if (rowStr.indexOf("토요일") !== -1) currentDay = "토요일";
         else if (rowStr.indexOf("일요일") !== -1) currentDay = "일요일";
         
-        dayStartRow = i;
         rooms = [];
-        
-        // 요일 행 다음 1~3행에서 방 이름 추출
         var headerSearchLimit = Math.min(i + 4, data.length);
         for (var hIdx = i + 1; hIdx < headerSearchLimit; hIdx++) {
           var hRow = data[hIdx];
@@ -195,19 +219,17 @@ function doGet(e) {
           for (var c = 1; c < hRow.length; c++) {
             var val = String(hRow[c]).trim();
             tempRooms.push(val);
-            if (val && val !== "1월" && val !== "2월" && val !== "12월") { // 월별 헤더 제외
+            if (val && val !== "1월" && val !== "2월" && val !== "12월") {
               hasRooms = true;
             }
           }
           if (hasRooms) {
-            // 정규 방 이름 리스트로 확정
             rooms = tempRooms;
           }
         }
         continue;
       }
       
-      // 시간표 행 발견 (A열이 '09:00~09:50' 과 같은 포맷인 경우)
       if (currentDay && firstCell && firstCell.indexOf(":") !== -1 && firstCell.indexOf("~") !== -1) {
         var timeSlot = firstCell;
         for (var colIdx = 1; colIdx < row.length; colIdx++) {
@@ -215,10 +237,7 @@ function doGet(e) {
           var roomName = rooms[colIdx - 1] || "";
           
           if (cellContent && roomName) {
-            // 방 이름의 정원 부분 제거 (예: '소리나루(12명)' -> '소리나루')
             roomName = roomName.split("(")[0].trim();
-            
-            // 셀 내용 파싱: 활동단명 (예약자명 - 메모)
             var parsed = parseCellContent(cellContent);
             
             result.reservations.push({
@@ -249,13 +268,11 @@ function parseCellContent(text) {
   var userName = "외부예약";
   var note = "";
   
-  // 1. 괄호가 있는지 확인: 활동단명 (예약자 - 메모)
   var bracketIdx = text.indexOf("(");
   if (bracketIdx !== -1) {
     teamName = text.substring(0, bracketIdx).trim();
     var innerText = text.substring(bracketIdx + 1, text.lastIndexOf(")")).trim();
     
-    // 대시(-)로 메모 분리 여부 확인
     var dashIdx = innerText.indexOf("-");
     if (dashIdx !== -1) {
       userName = innerText.substring(0, dashIdx).trim();
@@ -272,34 +289,31 @@ function parseCellContent(text) {
   };
 }
 
-// 2. 시트 내용 직접 편집 시 Firestore에 실시간 반영 (onEdit Trigger)
+// 2. 시트 내용 직접 편집 시 Firestore에 실시간 반영 (onEdit Trigger) - 셀 병합 일괄 처리
 function onEdit(e) {
   var range = e.range;
   var sheet = range.getSheet();
   var activeTabName = getActiveTabFromFirebase() || "2026년 6월";
   
-  if (sheet.getName() !== activeTabName) return; // 활성 탭이 아니면 패스
+  if (sheet.getName() !== activeTabName) return;
   
-  var rowIdx = range.getRow();
-  var colIdx = range.getColumn();
+  var startRow = range.getRow();
+  var startCol = range.getColumn();
+  var numRows = range.getNumRows();
+  var numCols = range.getNumColumns();
   var newValue = range.getValue().toString().trim();
   
-  // A열(시간대)이나 1~4행(헤더영역)을 수정한 경우 스킵
-  if (colIdx === 1 || rowIdx < 5) return;
+  // 헤더나 시간대 열 수정은 스킵
+  if (startCol === 1 || startRow < 5) return;
   
   var lastRow = sheet.getLastRow();
   var lastColumn = sheet.getLastColumn();
   var data = sheet.getRange(1, 1, lastRow, lastColumn).getValues();
   
-  // 해당 셀의 요일, 시간대, 공간명 찾기
+  // 요일 찾기 (startRow 기준 위로 올라감)
   var day = "";
-  var time = "";
-  var room = "";
-  var rooms = [];
-  
-  // 1. 요일 식별 (현재 행에서 위로 올라가며 요일 구분자를 찾음)
   var dayStartRow = -1;
-  for (var r = rowIdx; r > 0; r--) {
+  for (var r = startRow; r > 0; r--) {
     var rStr = data[r - 1].join(" ");
     if (rStr.indexOf("요일") !== -1 && (rStr.indexOf("년") !== -1 || rStr.indexOf("월") !== -1)) {
       dayStartRow = r;
@@ -316,7 +330,8 @@ function onEdit(e) {
   
   if (!day || dayStartRow === -1) return;
   
-  // 2. 공간명 식별 (요일 시작 행 바로 밑의 방 목록을 스캔)
+  // 공간 목록 추출
+  var rooms = [];
   var headerSearchLimit = Math.min(dayStartRow + 4, data.length);
   for (var hIdx = dayStartRow; hIdx < headerSearchLimit; hIdx++) {
     var hRow = data[hIdx];
@@ -334,55 +349,53 @@ function onEdit(e) {
     }
   }
   
-  room = rooms[colIdx - 2] || "";
-  if (!room) return;
-  room = room.split("(")[0].trim(); // 정원 제거
-  
-  // 3. 시간대 식별
-  time = data[rowIdx - 1][0].toString().trim();
-  if (time.indexOf(":") === -1 || time.indexOf("~") === -1) return; // 유효한 시간대가 아님
-  
-  // Firestore REST API를 쏘기 위한 Payload 빌드
-  var weekId = "current_week"; // 예약표 주차 구분 ID (기본값)
+  // 병합된 모든 개별 셀의 예약 상태를 Firestore에 순차 갱신 (병합 셀 일괄 동기화)
+  var weekId = "current_week";
   var dayId = getDayId(day);
-  var resId = time + "-" + room;
   
-  // Firestore 문서 업데이트 URL
-  var url = "https://firestore.googleapis.com/v1/projects/" + PROJECT_ID + "/databases/(default)/documents/reservations/" + weekId + "/" + dayId + "/" + resId;
-  
-  var options = {
-    method: "patch",
-    contentType: "application/json",
-    muteHttpExceptions: true
-  };
-  
-  if (newValue === "") {
-    // 셀이 지워진 경우 -> 빈 예약(취소)으로 데이터 업데이트 (보안 토큰 포함)
-    var payload = {
-      fields: {
-        apiToken: { stringValue: SECRET_API_TOKEN },
-        teamId: { nullValue: null }, // teamId가 null이면 예약 취소로 웹앱이 해석함
-        teamName: { stringValue: "" },
-        userName: { stringValue: "" },
-        note: { stringValue: "" }
+  for (var currR = startRow; currR < startRow + numRows; currR++) {
+    for (var currC = startCol; currC < startCol + numCols; currC++) {
+      var curTime = data[currR - 1][0].toString().trim();
+      var curRoom = rooms[currC - 2] || "";
+      if (!curRoom || curTime.indexOf(":") === -1 || curTime.indexOf("~") === -1) continue;
+      curRoom = curRoom.split("(")[0].trim();
+      
+      var resId = curTime + "-" + curRoom;
+      var url = "https://firestore.googleapis.com/v1/projects/" + PROJECT_ID + "/databases/(default)/documents/reservations/" + weekId + "/" + dayId + "/" + resId;
+      
+      var options = {
+        method: "patch",
+        contentType: "application/json",
+        muteHttpExceptions: true
+      };
+      
+      if (newValue === "") {
+        var payload = {
+          fields: {
+            apiToken: { stringValue: SECRET_API_TOKEN },
+            teamId: { nullValue: null },
+            teamName: { stringValue: "" },
+            userName: { stringValue: "" },
+            note: { stringValue: "" }
+          }
+        };
+        options.payload = JSON.stringify(payload);
+        UrlFetchApp.fetch(url + "?updateMask.fieldPaths=apiToken&updateMask.fieldPaths=teamId&updateMask.fieldPaths=teamName&updateMask.fieldPaths=userName&updateMask.fieldPaths=note", options);
+      } else {
+        var parsed = parseCellContent(newValue);
+        var payload = {
+          fields: {
+            apiToken: { stringValue: SECRET_API_TOKEN },
+            teamId: { stringValue: getTeamIdByName(parsed.teamName) || "external" },
+            teamName: { stringValue: parsed.teamName },
+            userName: { stringValue: parsed.userName },
+            note: { stringValue: parsed.note }
+          }
+        };
+        options.payload = JSON.stringify(payload);
+        UrlFetchApp.fetch(url + "?updateMask.fieldPaths=apiToken&updateMask.fieldPaths=teamId&updateMask.fieldPaths=teamName&updateMask.fieldPaths=userName&updateMask.fieldPaths=note", options);
       }
-    };
-    options.payload = JSON.stringify(payload);
-    UrlFetchApp.fetch(url + "?updateMask.fieldPaths=apiToken&updateMask.fieldPaths=teamId&updateMask.fieldPaths=teamName&updateMask.fieldPaths=userName&updateMask.fieldPaths=note", options);
-  } else {
-    // 셀에 예약 정보가 채워진 경우
-    var parsed = parseCellContent(newValue);
-    var payload = {
-      fields: {
-        apiToken: { stringValue: SECRET_API_TOKEN },
-        teamId: { stringValue: getTeamIdByName(parsed.teamName) || "external" },
-        teamName: { stringValue: parsed.teamName },
-        userName: { stringValue: parsed.userName },
-        note: { stringValue: parsed.note }
-      }
-    };
-    options.payload = JSON.stringify(payload);
-    UrlFetchApp.fetch(url + "?updateMask.fieldPaths=apiToken&updateMask.fieldPaths=teamId&updateMask.fieldPaths=teamName&updateMask.fieldPaths=userName&updateMask.fieldPaths=note", options);
+    }
   }
 }
 
@@ -392,7 +405,7 @@ function getDayId(dayText) {
   return map[dayText] || "mon";
 }
 
-// 활동단명으로 등록된 ID 매치 시도 (임의 지정 가능)
+// 등록된 이름 매칭 헬퍼
 function getTeamIdByName(name) {
   var map = {
     "나루지기": "narui",

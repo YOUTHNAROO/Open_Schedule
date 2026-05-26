@@ -533,7 +533,7 @@
           <div class="p-4 ${t.bg} border-b ${t.border}">
             <div class="flex items-start justify-between gap-2">
               <div>
-                <div class="text-[9px] font-semibold ${t.text} opacity-60">${esc(t.fullType)}</div>
+                <div class="text-[9px] font-semibold ${t.text} opacity-60">${esc(t.fullType)} ${t.shortName ? `| 약어: ${esc(t.shortName)}` : ''}</div>
                 <div class="text-base font-black ${t.text}">${esc(t.name)}</div>
               </div>
               <div class="flex gap-1 flex-shrink-0">
@@ -775,22 +775,29 @@
                     <p class="text-[10px] text-slate-400 mt-1">연동할 구글 스프레드시트 주소(URL)에서 d/와 /edit 사이의 문자열입니다.</p>
                   </div>
                   <div>
-                    <label class="block text-xs font-bold text-slate-700 mb-1.5">활성 시트 탭 이름 (가져올 탭)</label>
-                    <input type="text" id="sheet-tabname" value="${esc(settings.activeTabName)}" placeholder="예: 2026년 6월" class="w-full text-xs px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:border-teal-500" required>
-                    <p class="text-[10px] text-slate-400 mt-1">매달 복제하여 사용하는 시트의 탭 이름을 입력해 주세요 (정확히 일치해야 함).</p>
+                    <label class="block text-xs font-bold text-slate-700 mb-1.5">Google Apps Script 웹 앱 URL</label>
+                    <input type="url" id="sheet-gas-url" value="${esc(settings.gasWebAppUrl)}" placeholder="https://script.google.com/macros/s/.../exec" class="w-full text-xs px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:border-teal-500 font-mono" required>
+                    <p class="text-[10px] text-slate-400 mt-1">Apps Script 배포 시 획득한 웹앱 URL입니다.</p>
                   </div>
                 </div>
 
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
                   <div>
-                    <label class="block text-xs font-bold text-slate-700 mb-1.5">Google Apps Script 웹 앱 URL</label>
-                    <input type="url" id="sheet-gas-url" value="${esc(settings.gasWebAppUrl)}" placeholder="https://script.google.com/macros/s/.../exec" class="w-full text-xs px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:border-teal-500 font-mono" required>
-                    <p class="text-[10px] text-slate-400 mt-1">Apps Script 배포 시 획득한 웹앱 URL입니다.</p>
-                  </div>
-                  <div>
                     <label class="block text-xs font-bold text-slate-700 mb-1.5">보안 API 인증 토큰 (Security API Token)</label>
                     <input type="text" id="sheet-api-token" value="${esc(settings.apiToken)}" placeholder="보안용 난수 입력" class="w-full text-xs px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:border-teal-500 font-mono" required>
                     <p class="text-[10px] text-slate-400 mt-1">시트에서 직접 수정 시 이 토큰값으로 인증을 수행합니다. (Apps Script 변수와 일치 필요)</p>
+                  </div>
+                  <div>
+                    <label class="block text-xs font-bold text-slate-700 mb-1.5">연동할 시트 탭 이름</label>
+                    <div class="flex gap-2">
+                      <select id="sheet-tabname" class="flex-grow text-xs px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:border-teal-500 bg-white" required>
+                        <option value="${esc(settings.activeTabName)}" selected>${esc(settings.activeTabName || '시트 선택')}</option>
+                      </select>
+                      <button type="button" id="load-tabs-btn" class="bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 text-indigo-700 text-xs font-bold px-4 py-2.5 rounded-xl transition-all flex-shrink-0">
+                        탭 목록 불러오기
+                      </button>
+                    </div>
+                    <p class="text-[10px] text-slate-400 mt-1">먼저 탭 목록을 불러오신 뒤 연동할 탭(달)을 선택해 주세요.</p>
                   </div>
                 </div>
 
@@ -839,6 +846,31 @@
         
         lucide.createIcons();
         
+        // 탭 목록 불러오기 버튼 이벤트 바인딩
+        document.getElementById('load-tabs-btn')?.addEventListener('click', async () => {
+          const btn = document.getElementById('load-tabs-btn');
+          const gasUrl = document.getElementById('sheet-gas-url').value.trim();
+          if (!gasUrl) { showToast('먼저 Apps Script 웹 앱 URL을 입력해 주세요.', 'error'); return; }
+          
+          btn.disabled = true; btn.textContent = '불러오는 중...';
+          try {
+            const response = await fetch(`${gasUrl}?action=getTabs`);
+            const data = await response.json();
+            if (data.tabs && data.tabs.length > 0) {
+              const sel = document.getElementById('sheet-tabname');
+              const currentVal = sel.value;
+              sel.innerHTML = data.tabs.map(t => `<option value="${esc(t)}" ${t === currentVal ? 'selected' : ''}>${esc(t)}</option>`).join('');
+              showToast('스프레드시트에서 탭 목록을 성공적으로 가져왔습니다.', 'success');
+            } else {
+              throw new Error('가져온 탭 목록이 비어 있습니다.');
+            }
+          } catch(err) {
+            showToast('탭 목록 로드 실패: ' + err.message, 'error');
+          } finally {
+            btn.disabled = false; btn.textContent = '탭 목록 불러오기';
+          }
+        });
+        
         // 폼 제출 이벤트 바인딩
         document.getElementById('sheets-settings-form')?.addEventListener('submit', async e => {
           e.preventDefault();
@@ -846,7 +878,7 @@
           btn.disabled = true; btn.textContent = '저장 중...';
           
           const spreadsheetId = document.getElementById('sheet-id').value.trim();
-          const activeTabName = document.getElementById('sheet-tabname').value.trim();
+          const activeTabName = document.getElementById('sheet-tabname').value;
           const gasWebAppUrl = document.getElementById('sheet-gas-url').value.trim();
           const apiToken = document.getElementById('sheet-api-token').value.trim();
           
@@ -948,6 +980,7 @@
       document.getElementById('team-id').value = team?.id || '';
       document.getElementById('team-id').disabled = isEdit;
       document.getElementById('team-name').value = team?.name || '';
+      document.getElementById('team-shortname').value = team?.shortName || '';
       document.getElementById('team-fulltype').value = team?.fullType || '';
       document.getElementById('team-schedule').value = team?.schedule || '';
       document.getElementById('team-rooms').value = (team?.typicalRooms || []).join(', ');
@@ -1112,13 +1145,14 @@
           const isEdit = !!tid;
           const id = isEdit ? tid : document.getElementById('team-id').value.trim();
           const name = document.getElementById('team-name').value.trim();
+          const shortName = document.getElementById('team-shortname').value.trim();
           const fullType = document.getElementById('team-fulltype').value.trim();
           const schedule = document.getElementById('team-schedule').value.trim();
           const typicalRooms = document.getElementById('team-rooms').value.split(',').map(s => s.trim()).filter(Boolean);
           const colorKey = document.getElementById('team-color').value;
           const col = COLOR_OPTIONS.find(c => c.key === colorKey) || COLOR_OPTIONS[0];
           if (!id || !name) throw new Error('ID와 이름은 필수입니다.');
-          const data = { id, name, fullType, schedule, typicalRooms, bg: col.bg, text: col.text, border: col.border };
+          const data = { id, name, shortName, fullType, schedule, typicalRooms, bg: col.bg, text: col.text, border: col.border };
           if (isEdit) { const old = TEAMS.find(t => t.id === tid); await updateTeam(tid, data, old); showToast('활동단이 수정되었습니다.', 'success'); }
           else { await createTeam(data); showToast('활동단이 추가되었습니다.', 'success'); }
           hideModal('team-modal'); renderTeams();
@@ -1442,10 +1476,17 @@
               class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-400 placeholder-slate-300">
           </div>
         </div>
-        <div>
-          <label class="block text-xs font-semibold text-slate-600 mb-1.5">정식명칭</label>
-          <input id="team-fulltype" type="text" placeholder="예: 청소년운영위원회"
-            class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-400 placeholder-slate-300">
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1.5">정식명칭</label>
+            <input id="team-fulltype" type="text" placeholder="예: YNBC 대학생미디어"
+              class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-400 placeholder-slate-300">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1.5">활동단 약어 <span class="text-slate-400 font-normal">(예약표 노출용)</span></label>
+            <input id="team-shortname" type="text" placeholder="예: 대학생미디어 ➡️ 대미"
+              class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-400 placeholder-slate-300">
+          </div>
         </div>
         <div>
           <label class="block text-xs font-semibold text-slate-600 mb-1.5">정기 일정</label>
