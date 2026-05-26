@@ -801,8 +801,11 @@
                   </div>
                 </div>
 
-                <div class="flex justify-end pt-2 border-t border-slate-100 mt-4">
-                  <button type="submit" id="save-sheets-btn" class="bg-teal-500 hover:bg-teal-600 text-white text-xs font-bold py-2.5 px-6 rounded-xl transition-all shadow-md shadow-teal-100 flex items-center gap-1.5">
+                <div class="flex justify-between items-center pt-2 border-t border-slate-100 mt-4 gap-4">
+                  <button type="button" id="sync-sheet-to-web-btn" class="bg-amber-500 hover:bg-amber-600 disabled:bg-amber-300 text-white text-xs font-bold py-2.5 px-5 rounded-xl transition-all shadow-md shadow-amber-100 flex items-center gap-1.5">
+                    <i data-lucide="refresh-cw" class="w-4 h-4"></i> 시트 ➡️ 웹 전체 동기화 실행
+                  </button>
+                  <button type="submit" id="save-sheets-btn" class="bg-teal-500 hover:bg-teal-600 text-white text-xs font-bold py-2.5 px-6 rounded-xl transition-all shadow-md shadow-teal-100 flex items-center gap-1.5 flex-shrink-0">
                     <i data-lucide="save" class="w-4 h-4"></i> 설정 저장
                   </button>
                 </div>
@@ -836,8 +839,8 @@
                   <span>상단 <b>[배포] -> [새 배포]</b>에서 <b>유형: 웹 앱</b>을 지정하고, 액세스 권한을 <b>[모든 사용자]</b>로 배포하여 URL을 획득하고 등록합니다.</span>
                 </div>
                 <div class="flex gap-2">
-                  <span class="bg-teal-500/20 text-teal-300 px-1.5 py-0.5 rounded text-[10px] font-bold h-fit">Step 5</span>
-                  <span>스프레드시트 편집 시 연동을 위해 스크립트 에디터 왼쪽 메뉴 중 <b>[트리거 (알람시계 아이콘)]</b> 탭에서 새 트리거를 추가합니다. (이벤트 소스: 스프레드시트, 이벤트 유형: 수정 시, 실행할 함수: onEdit)</span>
+                  <span class="bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded text-[10px] font-bold h-fit">Step 5</span>
+                  <span class="text-amber-300 font-semibold">⚠️ 필수: 단순 <code>onEdit</code> 스크립트는 보안상 외부 통신이 차단됩니다. 반드시 Apps Script 왼쪽 메뉴의 ⏰ [트리거] 탭 -> [새 트리거 추가] -> 실행할 함수: <b>onEdit</b> / 이벤트 소스: <b>스프레드시트</b> / 이벤트 유형: <b>수정 시</b>로 하는 [설치형 트리거]를 수동 등록해야 시트 수정사항이 실시간으로 예약페이지에 반영됩니다!</span>
                 </div>
               </div>
             </div>
@@ -871,6 +874,92 @@
           }
         });
         
+        // 시트 -> 웹 전체 동기화 실행 이벤트 바인딩
+        document.getElementById('sync-sheet-to-web-btn')?.addEventListener('click', async () => {
+          const btn = document.getElementById('sync-sheet-to-web-btn');
+          const gasUrl = document.getElementById('sheet-gas-url').value.trim();
+          const activeTabName = document.getElementById('sheet-tabname').value;
+          
+          if (!gasUrl) { showToast('먼저 Apps Script 웹 앱 URL을 입력해 주세요.', 'error'); return; }
+          if (!activeTabName || activeTabName === '시트 선택') { showToast('동기화할 시트 탭 이름을 선택해 주세요.', 'error'); return; }
+          
+          if (!confirm(`[경고] 구글 시트의 '${activeTabName}' 탭 데이터로 웹 예약 테이블 데이터를 덮어씁니다.\n기존 웹에만 수동 등록되었던 일반 예약 데이터는 지워집니다. 진행하시겠습니까?`)) {
+            return;
+          }
+          
+          btn.disabled = true;
+          const origContent = btn.innerHTML;
+          btn.innerHTML = `<div class="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin mr-1.5"></div>동기화 진행 중...`;
+          
+          try {
+            showToast('구글 시트에서 전체 예약을 가져오고 있습니다...', 'info');
+            const response = await fetch(`${gasUrl}?activeTabName=${encodeURIComponent(activeTabName)}`);
+            const data = await response.json();
+            
+            if (data.error) {
+              throw new Error(data.error);
+            }
+            
+            if (!data.reservations || !Array.isArray(data.reservations)) {
+              throw new Error('시트 예약 목록을 가져올 수 없거나 형식이 올바르지 않습니다.');
+            }
+            
+            showToast('웹 예약 데이터 일괄 업데이트 중...', 'info');
+            
+            const daysToSync = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+            
+            // 1. 기존 예약을 요일별로 삭제
+            for (const dId of daysToSync) {
+              const colRef = collection(db, `reservations/current_week/${dId}`);
+              const snap = await getDocs(colRef);
+              const batch = writeBatch(db);
+              snap.forEach(docSnap => {
+                batch.delete(docSnap.ref);
+              });
+              await batch.commit();
+            }
+            
+            // 2. Apps Script에서 가져온 새 예약을 요일별로 분류 후 추가
+            const reservationsByDay = { mon: [], tue: [], wed: [], thu: [], fri: [], sat: [], sun: [] };
+            data.reservations.forEach(r => {
+              const matchedDay = DAYS.find(d => d.label === r.day);
+              if (matchedDay) {
+                reservationsByDay[matchedDay.id].push(r);
+              }
+            });
+            
+            for (const dId of daysToSync) {
+              const batch = writeBatch(db);
+              const list = reservationsByDay[dId];
+              list.forEach(r => {
+                const key = `${r.time}-${r.room}`;
+                const docRef = doc(db, `reservations/current_week/${dId}`, key);
+                
+                const matchedTeam = TEAMS.find(t => t.name === r.teamName);
+                const teamId = matchedTeam ? matchedTeam.id : 'external';
+                
+                batch.set(docRef, {
+                  teamId: teamId,
+                  teamName: r.teamName,
+                  userName: r.userName || '외부예약',
+                  note: r.note || '',
+                  apiToken: 'youthnaroo_secret_token_2026',
+                  updatedAt: serverTimestamp()
+                });
+              });
+              await batch.commit();
+            }
+            
+            showToast('전체 동기화가 성공적으로 완료되었습니다!', 'success');
+          } catch (err) {
+            console.error('Sync Error:', err);
+            showToast('동기화 실패: ' + err.message, 'error');
+          } finally {
+            btn.disabled = false;
+            btn.innerHTML = origContent;
+          }
+        });
+
         // 폼 제출 이벤트 바인딩
         document.getElementById('sheets-settings-form')?.addEventListener('submit', async e => {
           e.preventDefault();

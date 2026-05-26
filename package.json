@@ -4,7 +4,7 @@
   "description": "유스나루 활동단 공간 예약 시스템",
   "main": "index.html",
   "scripts": {
-    "copy-files": "cp index.html admin.html firebase-config.js favicon.png favicon.ico apple-touch-icon.png public/",
+    "copy-files": "cp index.html admin.html firebase-config.js google-apps-script.js favicon.png favicon.ico apple-touch-icon.png public/",
     "deploy": "npm run copy-files && firebase deploy"
   },
   "keywords": [],
