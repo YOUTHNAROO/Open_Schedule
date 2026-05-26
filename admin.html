@@ -941,7 +941,9 @@
               const batch = writeBatch(db);
               const list = reservationsByDay[dId];
               list.forEach(r => {
-                const key = `${r.time}-${r.room}`.replace(/\//g, '_');
+                // 시간 형식 표준화 (예: "09:00~09:50" -> "09:00")
+                const cleanTime = r.time.split('~')[0].trim();
+                const key = `${cleanTime}-${r.room}`.replace(/\//g, '_');
                 const docRef = doc(db, `reservations/${currentWeekId}/${dId}`, key);
                 
                 const matchedTeam = TEAMS.find(t => t.name === r.teamName);

@@ -361,12 +361,14 @@ function onEdit(e) {
   
   for (var currR = startRow; currR < startRow + numRows; currR++) {
     for (var currC = startCol; currC < startCol + numCols; currC++) {
-      var curTime = data[currR - 1][0].toString().trim();
+      var curTimeRaw = data[currR - 1][0].toString().trim();
       var curRoom = rooms[currC - 2] || "";
-      if (!curRoom || curTime.indexOf(":") === -1 || curTime.indexOf("~") === -1) continue;
+      if (!curRoom || curTimeRaw.indexOf(":") === -1 || curTimeRaw.indexOf("~") === -1) continue;
       curRoom = curRoom.split("(")[0].trim();
       
-      var resId = (curTime + "-" + curRoom).replace(/\//g, "_");
+      // 시간 형식 표준화 (예: "09:00~09:50" -> "09:00")
+      var cleanTime = curTimeRaw.split("~")[0].trim();
+      var resId = (cleanTime + "-" + curRoom).replace(/\//g, "_");
       var url = "https://firestore.googleapis.com/v1/projects/" + PROJECT_ID + "/databases/(default)/documents/reservations/" + weekId + "/" + dayId + "/" + resId;
       
       var options = {
