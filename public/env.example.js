@@ -12,6 +12,10 @@ window.ENV = {
   FIREBASE_APP_ID: "YOUR_FIREBASE_APP_ID",
   FIREBASE_MEASUREMENT_ID: "YOUR_MEASUREMENT_ID",
 
+  // Supabase (supabase.com > Project Settings > API Keys > Legacy anon)
+  SUPABASE_URL: "https://YOUR_PROJECT_ID.supabase.co",
+  SUPABASE_ANON_KEY: "YOUR_SUPABASE_ANON_KEY",
+
   // OneSignal (Dashboard > Keys & IDs)
   ONESIGNAL_APP_ID: "YOUR_ONESIGNAL_APP_ID",
   ONESIGNAL_REST_API_KEY: "YOUR_ONESIGNAL_REST_API_KEY",
