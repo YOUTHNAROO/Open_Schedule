@@ -242,17 +242,20 @@
             const password   = document.getElementById('reg-password')?.value;
             const password2  = document.getElementById('reg-password2')?.value;
             const inviteCode = document.getElementById('reg-invite')?.value.trim().toUpperCase();
+            const phone      = document.getElementById('reg-phone')?.value.trim();
             const secQ       = document.getElementById('reg-sec-q')?.value;
             const secA       = document.getElementById('reg-sec-a')?.value.trim();
+            const privacyOk  = document.getElementById('reg-privacy')?.checked;
             const errEl      = document.getElementById('reg-error');
             const showErr    = msg => { if(errEl){ errEl.textContent = msg; errEl.classList.remove('hidden'); } };
             errEl?.classList.add('hidden');
 
-            if (!username || !dispName || !password || !inviteCode || !secQ || !secA) return showErr('모든 항목을 입력하세요.');
+            if (!username || !dispName || !password || !inviteCode || !phone || !secQ || !secA) return showErr('모든 항목을 입력하세요.');
             if (!/^[a-z0-9_]{2,20}$/.test(username)) return showErr('아이디는 영소문자·숫자·_만 2~20자로 입력하세요.');
             if (password.length < 6) return showErr('비밀번호는 6자 이상이어야 합니다.');
             if (password !== password2) return showErr('비밀번호가 일치하지 않습니다.');
             if (secA.length < 2) return showErr('보안 답변을 입력하세요.');
+            if (!privacyOk) return showErr('개인정보 수집·이용에 동의해주세요.');
 
             const btn = document.getElementById('reg-submit-btn');
             btn.disabled = true; btn.textContent = '처리 중...';
@@ -279,8 +282,10 @@
                 const encPw      = await encryptPassword(password, secA);
                 await setDoc(doc(secDb, 'users', uid), {
                     username, displayName: dispName,
+                    phone: phone || '',
                     role: codeData.role || 'user',
                     allowedTeams: codeData.allowedTeams || [],
+                    privacyConsent: true, privacyConsentAt: new Date().toISOString(),
                     isActive: true, createdAt: serverTimestamp(), createdBy: 'self-register'
                 });
                 await setDoc(doc(secDb, 'user_recovery', username), {
@@ -1304,18 +1309,21 @@
             const customTeam = document.getElementById('detail-team-custom');
             const userName = document.getElementById('detail-user-name');
             const note = document.getElementById('detail-note');
-            const selectedTeam = teamSelect?.value || 'external';
+            const adminMode = !!teamSelect; // 관리자 전용 필드 존재 여부
+            const selectedTeam = adminMode ? (teamSelect?.value || 'external') : (existing.teamId || 'external');
             const matchedTeam = selectedTeam === 'external' ? null : getTeam(selectedTeam);
-            const nextTeamName = matchedTeam ? matchedTeam.name : (customTeam?.value || existing.teamName || '외부예약').trim().slice(0, 40);
-            const colorHexRaw = (document.getElementById('detail-sheet-color-hex')?.value || '').trim();
+            const nextTeamName = adminMode
+                ? (matchedTeam ? matchedTeam.name : (customTeam?.value || existing.teamName || '외부예약').trim().slice(0, 40))
+                : existing.teamName;
+            const colorHexRaw = adminMode ? (document.getElementById('detail-sheet-color-hex')?.value || '').trim() : (existing.sheetColor || '');
             const newSheetColor = isValidHexColor(colorHexRaw) ? colorHexRaw.toLowerCase() : '';
             const nextData = {
-                teamId: matchedTeam ? matchedTeam.id : 'external',
+                teamId: adminMode ? (matchedTeam ? matchedTeam.id : 'external') : existing.teamId,
                 teamName: nextTeamName || '외부예약',
-                userName: (userName?.value || '').trim().slice(0, 40) || '외부예약',
+                userName: adminMode ? ((userName?.value || '').trim().slice(0, 40) || '외부예약') : existing.userName,
                 note: (note?.value || '').trim().slice(0, 120),
                 sheetColor: newSheetColor,
-                sheetOwner: newSheetColor ? (currentUser.displayName || currentUser.username || '') : '',
+                sheetOwner: adminMode ? (newSheetColor ? (currentUser.displayName || currentUser.username || '') : '') : existing.sheetOwner,
                 updatedAt: serverTimestamp(),
                 updatedBy: currentUser.displayName || currentUser.username || ''
             };
@@ -1326,6 +1334,13 @@
                 syncGoogleSheets('reserve', activeDay, hour, room, nextData.teamName, nextData.userName, nextData.note);
                 if (nextData.note) await sendMentionNotifications(nextData.note, { type: 'memo', key });
                 notifyTeamLead(nextData.teamId, '예약 수정', `${activeDay} ${hour} ${room}`);
+                // 수정 로그 댓글 자동 추가
+                const logParts = [];
+                if (existing.teamName !== nextData.teamName) logParts.push(`활동단: ${existing.teamName} → ${nextData.teamName}`);
+                if (existing.userName !== nextData.userName) logParts.push(`담당자: ${existing.userName} → ${nextData.userName}`);
+                if ((existing.note || '') !== (nextData.note || '')) logParts.push(`메모 수정`);
+                if ((existing.sheetColor || '') !== (nextData.sheetColor || '')) logParts.push(`시트색상 변경`);
+                if (logParts.length) await addComment(key, `[수정] ${logParts.join(' / ')}`, { isLog: true });
                 showToast('세부 설정이 저장되었습니다.', 'success');
                 selectedReservationContext = { hour, room, key };
                 renderReservationDetails();
@@ -1334,17 +1349,18 @@
             }
         }
 
-        async function addComment(key, text) {
+        async function addComment(key, text, { isLog = false } = {}) {
             if (!text.trim() || !currentUser) return;
             const trimmed = text.trim().slice(0, 300);
             const comment = {
                 text: trimmed,
                 author: currentUser.displayName || currentUser.username,
                 userId: currentUser.id,
-                createdAt: new Date().toISOString()
+                createdAt: new Date().toISOString(),
+                ...(isLog ? { isLog: true } : {})
             };
             await setDoc(doc(db, `reservations/${currentWeekId}/${activeDay}`, key), { comments: arrayUnion(comment) }, { merge: true });
-            await sendMentionNotifications(trimmed, { type: 'comment', key });
+            if (!isLog) await sendMentionNotifications(trimmed, { type: 'comment', key });
         }
 
         // ==================== TEAM LEADER NOTIFICATION (A-5) ====================
@@ -1768,7 +1784,11 @@
                 return;
             }
             const team = getTeam(res.teamId);
-            const editable = canEditReservation(res) && !res.isFixed;
+            const admin = isAdmin();
+            const isOwner = currentUser && currentUser.id === res.userId;
+            const isTeamMember = currentUser && (currentUser.allowedTeams || []).includes(res.teamId);
+            const fullEditable = admin && !res.isFixed;
+            const noteEditable = (admin || isOwner || isTeamMember) && !res.isFixed;
             const cancellable = canEditReservation(res);
             const sheetColor = normalizeColor(res.sheetColor);
             const selectedTeamId = team ? team.id : 'external';
@@ -1777,13 +1797,23 @@
                 ...TEAMS.map(t => `<option value="${esc(t.id)}" ${selectedTeamId === t.id ? 'selected' : ''}>${esc(t.name)}</option>`)
             ].join('');
 
+            // 신청자 정보 (관리자만)
+            const applicantUser = admin && res.userId ? USERS_CACHE.find(u => u.id === res.userId) : null;
+            const applicantBlock = admin && applicantUser ? `
+                <div class="mt-3 rounded-lg bg-amber-50 border border-amber-100 px-3 py-2">
+                    <p class="text-[10px] font-bold text-amber-700 mb-1">신청자 정보</p>
+                    <p class="text-xs text-amber-900 font-semibold">${esc(applicantUser.displayName || applicantUser.username)}</p>
+                    <p class="text-[11px] text-amber-700 font-mono mt-0.5">${applicantUser.phone ? esc(applicantUser.phone) : '연락처 없음'}</p>
+                </div>` : '';
+
             content.innerHTML = `
                 <div class="p-5 border-b border-slate-100">
                     <div class="flex items-start justify-between gap-3">
                         <div>
                             <p class="text-[11px] font-bold text-teal-600 mb-1">${DAYS.find(d => d.id === activeDay)?.fullLabel || activeDay} · ${esc(hour)} · ${esc(room)}</p>
                             <h2 class="text-lg font-black text-slate-900 leading-tight">${esc(res.teamName || '예약')}</h2>
-                            <p class="text-xs text-slate-400 mt-1">${res.isFixed ? '고정 일정' : '일반 예약'}${res.sheetOwner ? ` · ${esc(res.sheetOwner)}` : ''}</p>
+                            <p class="text-xs text-slate-400 mt-1">${res.isFixed ? '고정 일정' : '일반 예약'}${res.userName ? ` · 담당: ${esc(res.userName)}` : ''}</p>
+                            ${applicantBlock}
                         </div>
                         <button id="reservation-detail-close" class="p-2 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition-colors" title="닫기">
                             <i data-lucide="x" class="w-5 h-5"></i>
@@ -1793,45 +1823,46 @@
                         <span class="w-5 h-5 rounded border border-slate-300" style="background:${sheetColor}"></span>
                         <div>
                             <div class="text-[11px] font-bold text-slate-700">시트 색상</div>
-                            <div class="text-[10px] text-slate-400">${sheetColor}${res.sheetOwner ? ` · ${esc(res.sheetOwner)}` : ' · 담당자 미지정'}</div>
+                            <div class="text-[10px] text-slate-400">${sheetColor}${res.sheetOwner ? ` · ${esc(res.sheetOwner)}` : ''}</div>
                         </div>
                     </div>` : ''}
                 </div>
                 <div class="p-5 space-y-4">
+                    ${fullEditable ? `
                     <div>
                         <label class="block text-xs font-bold text-slate-600 mb-1.5">수업 변경</label>
-                        <select id="detail-team" ${editable ? '' : 'disabled'} class="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-teal-400 disabled:bg-slate-50 disabled:text-slate-400">
+                        <select id="detail-team" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-teal-400">
                             ${teamOptions}
                         </select>
                     </div>
                     <div id="detail-team-custom-wrap" class="${selectedTeamId === 'external' ? '' : 'hidden'}">
                         <label class="block text-xs font-bold text-slate-600 mb-1.5">수업명 직접 입력</label>
-                        <input id="detail-team-custom" ${editable ? '' : 'disabled'} value="${esc(team ? '' : res.teamName || '')}" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-400 disabled:bg-slate-50">
+                        <input id="detail-team-custom" value="${esc(team ? '' : res.teamName || '')}" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-400">
                     </div>
                     <div>
                         <label class="block text-xs font-bold text-slate-600 mb-1.5">담당자 변경</label>
                         <div class="relative">
-                            <input id="detail-user-name" ${editable ? '' : 'disabled'} value="${esc(res.userName || '')}" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-400 disabled:bg-slate-50" placeholder="담당자 이름 또는 @아이디">
+                            <input id="detail-user-name" value="${esc(res.userName || '')}" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-400" placeholder="담당자 이름 또는 @아이디">
                         </div>
                     </div>
                     <div>
                         <label class="block text-xs font-bold text-slate-600 mb-1.5">시트 색상</label>
                         <div class="flex items-center gap-2">
-                            <input type="color" id="detail-sheet-color-picker" value="${sheetColor || '#ffffff'}" ${editable ? '' : 'disabled'} class="w-9 h-9 rounded border border-slate-200 cursor-pointer disabled:cursor-not-allowed p-0.5">
-                            <input id="detail-sheet-color-hex" value="${sheetColor || ''}" ${editable ? '' : 'disabled'} placeholder="#없음 (색상 없음)" maxlength="7" class="flex-1 px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-400 font-mono disabled:bg-slate-50">
-                            ${editable ? `<button id="detail-sheet-color-clear" type="button" class="px-2.5 py-2 text-xs text-slate-400 hover:text-red-500 border border-slate-200 rounded-lg hover:border-red-200 transition-colors" title="색상 제거">✕</button>` : ''}
+                            <input type="color" id="detail-sheet-color-picker" value="${sheetColor || '#ffffff'}" class="w-9 h-9 rounded border border-slate-200 cursor-pointer p-0.5">
+                            <input id="detail-sheet-color-hex" value="${sheetColor || ''}" placeholder="#없음 (색상 없음)" maxlength="7" class="flex-1 px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-400 font-mono">
+                            <button id="detail-sheet-color-clear" type="button" class="px-2.5 py-2 text-xs text-slate-400 hover:text-red-500 border border-slate-200 rounded-lg hover:border-red-200 transition-colors" title="색상 제거">✕</button>
                         </div>
-                    </div>
+                    </div>` : ''}
                     <div>
                         <label class="block text-xs font-bold text-slate-600 mb-1.5">메모</label>
                         <div class="relative">
-                            <textarea id="detail-note" ${editable ? '' : 'disabled'} rows="3" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-400 resize-none disabled:bg-slate-50" placeholder="예약 관련 메모를 입력하세요 (@로 태그)">${esc(res.note || '')}</textarea>
+                            <textarea id="detail-note" ${noteEditable ? '' : 'disabled'} rows="3" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-400 resize-none disabled:bg-slate-50 disabled:text-slate-400" placeholder="예약 관련 메모 (@로 태그)">${esc(res.note || '')}</textarea>
                         </div>
                     </div>
-                    ${!editable && res.isFixed ? `<div class="rounded-lg bg-blue-50 border border-blue-100 text-blue-700 text-xs px-3 py-2">고정 일정은 관리자 고정 일정 메뉴에서 수정할 수 있습니다.</div>` : ''}
+                    ${res.isFixed ? `<div class="rounded-lg bg-blue-50 border border-blue-100 text-blue-700 text-xs px-3 py-2">고정 일정은 관리자 고정 일정 메뉴에서 수정할 수 있습니다.</div>` : ''}
                 </div>
                 <div class="p-5 border-t border-slate-100 bg-slate-50 flex gap-2">
-                    <button id="reservation-detail-save" ${editable ? '' : 'disabled'} class="flex-1 py-2.5 rounded-lg text-sm font-bold bg-teal-600 text-white hover:bg-teal-700 disabled:bg-slate-200 disabled:text-slate-400 transition-colors flex items-center justify-center gap-1.5">
+                    <button id="reservation-detail-save" ${noteEditable ? '' : 'disabled'} class="flex-1 py-2.5 rounded-lg text-sm font-bold bg-teal-600 text-white hover:bg-teal-700 disabled:bg-slate-200 disabled:text-slate-400 transition-colors flex items-center justify-center gap-1.5">
                         <i data-lucide="save" class="w-4 h-4"></i> 저장
                     </button>
                     <button id="reservation-detail-cancel" ${cancellable ? '' : 'disabled'} class="px-4 py-2.5 rounded-lg text-sm font-bold bg-white border border-red-200 text-red-600 hover:bg-red-50 disabled:border-slate-200 disabled:text-slate-300 transition-colors flex items-center gap-1.5">
@@ -1842,13 +1873,20 @@
                     <div class="flex items-center gap-2 mb-3">
                         <i data-lucide="message-circle" class="w-3.5 h-3.5 text-slate-400"></i>
                         <span class="text-xs font-bold text-slate-600">댓글</span>
-                        <span class="text-[10px] text-slate-400 ml-auto">${(res.comments || []).length}개</span>
+                        <span class="text-[10px] text-slate-400 ml-auto">${(res.comments || []).filter(c => !c.isLog).length}개</span>
                     </div>
                     <div id="detail-comments-list" class="space-y-2 mb-3 max-h-52 overflow-y-auto">
                         ${(res.comments || []).length === 0
                             ? `<p class="text-xs text-slate-400 text-center py-3">아직 댓글이 없습니다.</p>`
-                            : (res.comments || []).map(c => `
-                                <div class="bg-white border border-slate-100 rounded-xl px-3 py-2.5 shadow-sm">
+                            : (res.comments || []).map(c => c.isLog
+                                ? `<div class="flex items-start gap-2 px-2 py-1.5 rounded-lg bg-slate-50 border border-slate-100">
+                                    <i data-lucide="git-commit-horizontal" class="w-3 h-3 text-slate-400 mt-0.5 shrink-0"></i>
+                                    <div class="flex-1 min-w-0">
+                                        <span class="text-[10px] text-slate-500 leading-relaxed">${esc(c.text)}</span>
+                                        <span class="text-[9px] text-slate-400 ml-1.5">${esc(c.author)} · ${formatTime(c.createdAt)}</span>
+                                    </div>
+                                </div>`
+                                : `<div class="bg-white border border-slate-100 rounded-xl px-3 py-2.5 shadow-sm">
                                     <div class="flex items-center gap-1.5 mb-1">
                                         <span class="w-5 h-5 rounded-full bg-teal-100 text-teal-700 text-[9px] font-bold flex items-center justify-center shrink-0">${esc((c.author||'?')[0])}</span>
                                         <span class="text-[11px] font-bold text-slate-700">${esc(c.author || '알 수 없음')}</span>
@@ -1872,10 +1910,10 @@
             document.getElementById('reservation-detail-close')?.addEventListener('click', closeReservationDetails);
             document.getElementById('reservation-detail-save')?.addEventListener('click', updateReservationDetails);
             document.getElementById('reservation-detail-cancel')?.addEventListener('click', () => cancelReservation(hour, room));
+            // 관리자 전용 필드 이벤트
             document.getElementById('detail-team')?.addEventListener('change', e => {
                 document.getElementById('detail-team-custom-wrap')?.classList.toggle('hidden', e.target.value !== 'external');
             });
-            // 색상 피커 ↔ hex 입력 동기화
             document.getElementById('detail-sheet-color-picker')?.addEventListener('input', e => {
                 const hex = document.getElementById('detail-sheet-color-hex');
                 if (hex) hex.value = e.target.value;
@@ -1909,7 +1947,6 @@
             commentInput?.addEventListener('keydown', e => {
                 if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); document.getElementById('detail-comment-submit')?.click(); }
             });
-            // 태그 기능 연결 (담당자는 이름 자동완성, 메모/댓글은 @멘션)
             setupPersonTagInput(document.getElementById('detail-user-name'));
             setupTagInput(document.getElementById('detail-note'));
             setupTagInput(document.getElementById('detail-comment-input'));
@@ -3030,6 +3067,63 @@
         <span id="toast-msg">알림</span>
     </div>
 
+    <!-- ===================== 개인정보 처리방침 모달 ===================== -->
+    <div id="privacy-modal" class="hidden fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm border border-slate-200 max-h-[80vh] flex flex-col">
+            <div class="flex items-center justify-between p-4 border-b border-slate-100 flex-shrink-0">
+                <h3 class="font-bold text-slate-800 text-sm">개인정보 수집·이용 안내</h3>
+                <button onclick="document.getElementById('privacy-modal').classList.add('hidden')"
+                    class="p-1 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors">
+                    <i data-lucide="x" class="w-4 h-4"></i>
+                </button>
+            </div>
+            <div class="overflow-y-auto p-4 text-xs text-slate-600 space-y-3 leading-relaxed">
+                <p class="text-[11px] text-slate-400">서울시립마포청소년센터 유스나루는 공간 예약 서비스 운영을 위해 아래와 같이 개인정보를 수집·이용합니다.</p>
+                <table class="w-full border-collapse text-[11px]">
+                    <thead>
+                        <tr class="bg-slate-50">
+                            <th class="border border-slate-200 px-2 py-1.5 text-left font-semibold text-slate-700">항목</th>
+                            <th class="border border-slate-200 px-2 py-1.5 text-left font-semibold text-slate-700">수집 목적</th>
+                            <th class="border border-slate-200 px-2 py-1.5 text-left font-semibold text-slate-700">보유 기간</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td class="border border-slate-200 px-2 py-1.5">이름(표시이름)</td>
+                            <td class="border border-slate-200 px-2 py-1.5">예약자 식별, 담당자 표시</td>
+                            <td class="border border-slate-200 px-2 py-1.5 text-slate-500">탈퇴 시 즉시 삭제</td>
+                        </tr>
+                        <tr class="bg-slate-50/50">
+                            <td class="border border-slate-200 px-2 py-1.5">아이디</td>
+                            <td class="border border-slate-200 px-2 py-1.5">로그인, 계정 관리</td>
+                            <td class="border border-slate-200 px-2 py-1.5 text-slate-500">탈퇴 시 즉시 삭제</td>
+                        </tr>
+                        <tr>
+                            <td class="border border-slate-200 px-2 py-1.5">휴대폰 번호</td>
+                            <td class="border border-slate-200 px-2 py-1.5">예약 관련 연락, 담당자 확인</td>
+                            <td class="border border-slate-200 px-2 py-1.5 text-slate-500">탈퇴 시 즉시 삭제</td>
+                        </tr>
+                        <tr class="bg-slate-50/50">
+                            <td class="border border-slate-200 px-2 py-1.5">비밀번호 (암호화)</td>
+                            <td class="border border-slate-200 px-2 py-1.5">본인 인증</td>
+                            <td class="border border-slate-200 px-2 py-1.5 text-slate-500">탈퇴 시 즉시 삭제</td>
+                        </tr>
+                    </tbody>
+                </table>
+                <div class="bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 text-[11px] text-amber-700">
+                    수집된 개인정보는 유스나루 공간 예약 시스템 운영 목적 외에 제3자에게 제공하지 않습니다.
+                </div>
+                <p class="text-[11px] text-slate-400">동의를 거부할 권리가 있으나, 거부 시 서비스 이용이 불가합니다. 문의: 서울시립마포청소년센터 유스나루</p>
+            </div>
+            <div class="p-4 border-t border-slate-100 flex-shrink-0">
+                <button onclick="document.getElementById('reg-privacy').checked=true; document.getElementById('privacy-modal').classList.add('hidden')"
+                    class="w-full py-2.5 bg-teal-600 hover:bg-teal-700 text-white text-sm font-bold rounded-xl transition-colors">
+                    동의하고 닫기
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- ===================== RESERVATION DETAIL DRAWER ===================== -->
     <div id="reservation-detail-drawer" class="hidden fixed inset-0 z-50">
         <div class="absolute inset-0 bg-slate-900/30 backdrop-blur-[2px]" data-close-modal="reservation-detail-drawer"
@@ -3277,6 +3371,11 @@
                         <input id="reg-invite" type="text" placeholder="관리자에게 받은 코드 입력" required autocomplete="off"
                             class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400 uppercase tracking-widest">
                     </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">연락처 * (휴대폰 번호)</label>
+                        <input id="reg-phone" type="tel" placeholder="010-0000-0000" required autocomplete="tel"
+                            class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400">
+                    </div>
                     <div class="border-t border-slate-100 pt-3">
                         <p class="text-[10px] text-slate-400 mb-2">비밀번호 찾기를 위한 보안 질문을 설정하세요</p>
                         <label class="block text-xs font-semibold text-slate-600 mb-1">보안 질문 *</label>
@@ -3288,6 +3387,17 @@
                         <label class="block text-xs font-semibold text-slate-600 mb-1">보안 답변 *</label>
                         <input id="reg-sec-a" type="text" placeholder="답변 입력" required autocomplete="off"
                             class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400">
+                    </div>
+                    <!-- 개인정보동의 -->
+                    <div class="bg-slate-50 border border-slate-200 rounded-xl p-3">
+                        <div class="flex items-start gap-2">
+                            <input id="reg-privacy" type="checkbox" class="mt-0.5 rounded accent-teal-600 w-4 h-4 shrink-0">
+                            <label for="reg-privacy" class="text-xs text-slate-600 leading-relaxed cursor-pointer">
+                                <span class="font-semibold text-slate-800">개인정보 수집·이용에 동의합니다.</span> (필수)
+                                <button type="button" onclick="document.getElementById('privacy-modal').classList.remove('hidden')"
+                                    class="ml-1 text-teal-600 underline underline-offset-2 hover:text-teal-800">내용 보기</button>
+                            </label>
+                        </div>
                     </div>
                     <div id="reg-error" class="hidden bg-red-50 border border-red-200 text-red-600 text-xs px-3 py-2 rounded-xl"></div>
                     <button id="reg-submit-btn" type="submit"

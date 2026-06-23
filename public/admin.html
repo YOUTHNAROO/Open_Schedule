@@ -319,7 +319,7 @@
     }
 
     // ========== USER CRUD ==========
-    async function createUser({ username, displayName, password, role, allowedTeams, isActive, photoUrl }) {
+    async function createUser({ username, displayName, password, role, allowedTeams, isActive, photoUrl, phone }) {
       const email = `${username}@youthnaroo.local`;
 
       // 보조 앱을 사용하여 관리자 세션 유지하며 계정 생성
@@ -337,6 +337,7 @@
         const ref = doc(db, 'users', newUid);
         const userData = { username, displayName, role, allowedTeams, isActive, createdAt: serverTimestamp(), createdBy: currentUser.displayName };
         if (photoUrl) userData.photoUrl = photoUrl;
+        if (phone) userData.phone = phone;
         await setDoc(ref, userData);
         await addActivityLog('사용자_생성', username, null, { role, allowedTeams });
       } catch (err) {
@@ -347,12 +348,13 @@
       }
     }
 
-    async function updateUser(id, { displayName, role, allowedTeams, isActive, newPassword, photoUrl }, oldData = {}) {
+    async function updateUser(id, { displayName, role, allowedTeams, isActive, newPassword, photoUrl, phone }, oldData = {}) {
       const upd = { displayName, role, allowedTeams, isActive, updatedAt: serverTimestamp() };
       if (newPassword && newPassword.length >= 6) {
         upd.pendingPasswordChange = newPassword;
       }
       if (photoUrl !== undefined) upd.photoUrl = photoUrl;
+      if (phone !== undefined) upd.phone = phone;
       await updateDoc(doc(db, 'users', id), upd);
       const oldUsername = oldData?.username || '알수없음';
       await addActivityLog('사용자_수정', oldUsername, oldData || null, { displayName, role, allowedTeams, isActive, passwordChanged: !!(newPassword) });
@@ -677,6 +679,7 @@
             <th class="px-4 py-3 text-xs font-bold text-slate-500">이름</th>
             <th class="px-4 py-3 text-xs font-bold text-slate-500">역할</th>
             <th class="px-4 py-3 text-xs font-bold text-slate-500">활동단 권한</th>
+            <th class="px-4 py-3 text-xs font-bold text-slate-500">연락처</th>
             <th class="px-4 py-3 text-xs font-bold text-slate-500">상태</th>
             <th class="px-4 py-3 text-xs font-bold text-slate-500 text-right">작업</th>
           </tr></thead>
@@ -691,6 +694,7 @@
           (u.allowedTeams || []).length === 0 ? `<span class="text-[10px] text-red-400">배정 없음</span>` :
             (u.allowedTeams || []).map(tid => { const t = getTeam(tid); return `<span class="inline-block px-1.5 py-0.5 text-[9px] font-bold rounded mr-1 mb-0.5 ${t ? `${t.bg} ${t.text}` : ''}">${t ? t.name : tid}</span>`; }).join('')}
                 </td>
+                <td class="px-4 py-3 text-xs text-slate-600 font-mono">${u.phone ? esc(u.phone) : '<span class="text-slate-300">-</span>'}</td>
                 <td class="px-4 py-3">
                   <span class="px-2 py-0.5 text-[10px] font-bold rounded-full ${u.isActive ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}">${u.isActive ? '✓ 활성' : '✗ 비활성'}</span>
                 </td>
@@ -1237,6 +1241,7 @@
       
       document.getElementById('user-role').value = user?.role || 'user';
       document.getElementById('user-is-active').checked = user?.isActive !== false;
+      document.getElementById('user-phone').value = user?.phone || '';
       document.getElementById('user-teams-cb').innerHTML = teamCbs;
       document.getElementById('user-role').dispatchEvent(new Event('change'));
       const photoFileEl = document.getElementById('user-photo-file');
@@ -1544,6 +1549,7 @@
           const role = document.getElementById('user-role').value;
           const isActive = document.getElementById('user-is-active').checked;
           const allowedTeams = Array.from(document.querySelectorAll('[name=allowedTeams]:checked')).map(c => c.value);
+          const phone = (document.getElementById('user-phone')?.value || '').trim();
           if (!displayName || (!isEdit && !password)) throw new Error('필수 항목을 모두 입력해주세요.');
           if (isEdit && password && password.length < 6) throw new Error('비밀번호는 6자 이상이어야 합니다.');
           let photoUrl = undefined;
@@ -1555,10 +1561,10 @@
           }
           if (isEdit) {
             const users = await loadUsers(); const old = users.find(u => u.id === uid);
-            await updateUser(uid, { displayName, newPassword: password, role, allowedTeams, isActive, photoUrl }, old);
+            await updateUser(uid, { displayName, newPassword: password, role, allowedTeams, isActive, photoUrl, phone }, old);
             showToast(`사용자가 수정되었습니다.${password ? ' (비밀번호 변경은 다음 로그인 시 적용)' : ''}`, 'success');
           } else {
-            await createUser({ username, displayName, password, role, allowedTeams, isActive, photoUrl });
+            await createUser({ username, displayName, password, role, allowedTeams, isActive, photoUrl, phone });
             showToast('사용자가 추가되었습니다.', 'success');
           }
           hideModal('user-modal'); await renderUsers();
@@ -1971,6 +1977,11 @@
           <input id="user-password" type="password" placeholder="비밀번호"
             class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400 placeholder-slate-300">
           <p id="user-password-tip" class="text-[10px] text-amber-600 mt-1.5 hidden">💡 타인의 비밀번호는 보안상 Firebase Console에서만 직접 재설정할 수 있습니다.</p>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1.5">연락처</label>
+          <input id="user-phone" type="tel" placeholder="010-0000-0000"
+            class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400 placeholder-slate-300">
         </div>
         <div class="grid grid-cols-2 gap-3">
           <div>
