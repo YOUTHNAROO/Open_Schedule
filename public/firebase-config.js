@@ -21,4 +21,12 @@ const firebaseConfig = {
 // Firebase 초기화 여부 확인 (설정이 기본값이면 데모 모드로 동작)
 const IS_DEMO_MODE = firebaseConfig.apiKey === "YOUR_API_KEY";
 
-export { firebaseConfig, IS_DEMO_MODE };
+// ─── OneSignal 푸시 알림 설정 ───────────────────────────────────────────────
+// 1) https://onesignal.com 에서 무료 계정 생성
+// 2) New App 생성 → Web → 앱 이름 입력 → Site URL: https://youthnarooschedule.web.app
+// 3) Keys & IDs 페이지에서 아래 두 값을 복사
+const ONESIGNAL_APP_ID = 'YOUR_ONESIGNAL_APP_ID';         // Keys & IDs > OneSignal App ID
+const ONESIGNAL_REST_API_KEY = 'YOUR_ONESIGNAL_REST_KEY'; // Keys & IDs > REST API Key
+// ────────────────────────────────────────────────────────────────────────────
+
+export { firebaseConfig, IS_DEMO_MODE, ONESIGNAL_APP_ID, ONESIGNAL_REST_API_KEY };

@@ -1,0 +1,19 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 비밀번호 찾기: 비인증 읽기(보안질문 조회), 쓰기는 인증 필요(secondaryApp 인증 컨텍스트)
+    match /user_recovery/{username} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+    // 초대코드: 비인증 읽기(회원가입 검증), 쓰기는 인증 필요
+    match /invite_codes/{code} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+    // 나머지 모든 문서: 인증된 사용자만
+    match /{document=**} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}

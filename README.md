@@ -1,222 +1,110 @@
-# 🏫 유스나루 활동단 공간 예약 시스템
+# 유스나루 활동단 공간 예약 시스템
 
-서울시립마포청소년센터 유스나루 활동단별 활동실 실시간 예약 시스템입니다.
+서울시립마포청소년센터 유스나루에서 사용하는 활동단별 공간 예약 시스템이에요.  
+활동단마다 쓸 수 있는 공간이랑 시간이 달라서, 실시간으로 확인하고 예약할 수 있도록 만들었습니다.
 
----
-
-## 📁 파일 구조
-
-```
-youthnaroo schedule/
-├── index.html          ← 메인 앱 (이 파일 하나로 전체 실행)
-├── firebase-config.js  ← Firebase 설정 (참고용)
-└── README.md           ← 이 파일
-```
+배포 주소: https://youthnaroo.xyz
 
 ---
 
-## 🚀 빠른 시작 (데모 모드)
+## 이런 기능들이 있어요
 
-Firebase 설정 없이도 즉시 테스트할 수 있습니다.
-
-1. `index.html` 파일을 브라우저로 열기
-2. 상단의 노란 배너가 나타나면 **데모 모드**로 실행 중
-3. 로그인 버튼을 눌러 활동단 선택 + 이름 입력 후 시작
-
-> ⚠️ 데모 모드에서는 데이터가 브라우저 메모리에만 저장됩니다.  
-> 새로고침하면 초기화됩니다. 실제 운영 시 아래 Firebase 설정을 진행하세요.
+- 요일·시간·공간별로 예약 현황을 한눈에 볼 수 있어요
+- 같은 시간에 두 팀이 겹치는 일 없도록 동시 예약을 막아줘요
+- 관리자는 고정 일정을 따로 등록하거나 특정 시간대를 특정 활동단 전용으로 잠글 수 있어요
+- 예약하거나 취소하면 푸시 알림이 가요 (허용한 경우)
+- 지난 주 예약 기록도 아카이브에서 볼 수 있어요
+- 엑셀로 내보내기도 돼요
 
 ---
 
-## 🔥 Firebase 연결 설정 (실제 운영용)
+## 기술 스택
 
-### 1단계: Firebase 프로젝트 생성
-
-1. [Firebase Console](https://console.firebase.google.com) 접속
-2. **프로젝트 추가** → 프로젝트 이름: `youthnaroo-schedule` (또는 원하는 이름)
-3. Google Analytics: 선택 사항 (비활성화해도 무방)
-
-### 2단계: Firestore 데이터베이스 활성화
-
-1. 왼쪽 메뉴 → **Firestore Database** 클릭
-2. **데이터베이스 만들기** 클릭
-3. **테스트 모드로 시작** 선택 (나중에 보안 규칙 설정)
-4. 리전: `asia-northeast3 (서울)` 선택 후 완료
-
-### 3단계: 웹 앱 등록 및 Config 복사
-
-1. Firebase Console → 프로젝트 설정 (⚙️ 아이콘)
-2. **내 앱** 섹션 → 웹 아이콘(`</>`) 클릭
-3. 앱 닉네임 입력 후 **앱 등록**
-4. 아래와 같은 `firebaseConfig` 코드가 나타납니다:
-
-```javascript
-const firebaseConfig = {
-  apiKey: "AIza...",
-  authDomain: "your-project.firebaseapp.com",
-  projectId: "your-project-id",
-  storageBucket: "your-project.appspot.com",
-  messagingSenderId: "123456789",
-  appId: "1:123...:web:abc..."
-};
-```
-
-### 4단계: index.html에 Config 붙여넣기
-
-`index.html` 파일을 텍스트 에디터로 열고, 다음 부분을 찾아 교체하세요:
-
-```javascript
-// 변경 전 (약 35번째 줄)
-const firebaseConfig = {
-    apiKey: "YOUR_API_KEY",
-    authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-    ...
-};
-
-// 변경 후
-const firebaseConfig = {
-    apiKey: "AIza...",           // Firebase에서 복사한 값
-    authDomain: "your-project.firebaseapp.com",
-    projectId: "your-project-id",
-    storageBucket: "your-project.appspot.com",
-    messagingSenderId: "123456789",
-    appId: "1:123...:web:abc..."
-};
-```
-
-### 5단계: Firestore 보안 규칙 설정
-
-Firebase Console → Firestore → **규칙** 탭에서 아래 규칙을 붙여넣으세요:
-
-```
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    // 예약 데이터: 모든 사용자 읽기/쓰기 가능 (앱에서 권한 제어)
-    match /reservations/{weekId}/{day}/{docId} {
-      allow read, write: if true;
-    }
-    // 고정 일정: 모든 사용자 읽기 가능
-    match /fixed_schedules/{docId} {
-      allow read: if true;
-      allow write: if true; // 앱에서 관리자 권한 제어
-    }
-    // 활동단 데이터: 읽기 전용 (공개)
-    match /teams/{docId} {
-      allow read: if true;
-      allow write: if true;
-    }
-    // 감사 로그: 읽기/쓰기 가능
-    match /audit_logs/{docId} {
-      allow read, write: if true;
-    }
-    // 아카이브: 읽기/쓰기 가능
-    match /archive/{docId} {
-      allow read, write: if true;
-    }
-  }
-}
-```
-
-> 📌 위 규칙은 운영 환경에서 적합합니다. 민감한 데이터가 있다면 추가 인증 설정을 권장합니다.
+- Firebase Firestore (실시간 DB)
+- Firebase Hosting (배포)
+- Firebase Authentication
+- OneSignal (웹 푸시 알림)
+- Tailwind CSS (스타일)
+- 별도 빌드 없이 단일 HTML 파일로 동작해요
 
 ---
 
-## 🔑 관리자 비밀번호 변경
+## 로컬에서 열어보려면
 
-`index.html` 파일에서 다음 줄을 찾아 변경하세요:
+그냥 `public/index.html`을 브라우저로 열면 돼요.  
+Firebase 연결 없이는 데모 모드로 실행되고, 새로고침하면 데이터가 초기화돼요.
 
-```javascript
-const ADMIN_PASSWORD = "youthnaroo2026!";
-```
-
-원하는 비밀번호로 변경한 뒤 저장하면 됩니다.
+실제 운영용 Firebase 설정이 필요하다면 따로 연락주세요.
 
 ---
 
-## 🌐 배포 방법 (선택사항)
+## 폴더 구조
 
-로컬 파일 대신 온라인으로 배포하려면:
+```
+public/
+├── index.html              메인 앱
+├── admin.html              관리자 전용 페이지
+├── OneSignalSDKWorker.js   푸시 알림 서비스워커
+└── firebase-config.js      Firebase 설정 (참고용)
 
-### Firebase Hosting (무료, 권장)
+photos/                     기여자 사진 폴더
+```
+
+---
+
+## 배포
+
+Firebase Hosting을 쓰고 있어요.
+
 ```bash
-npm install -g firebase-tools
-firebase login
-firebase init hosting
-firebase deploy
+firebase deploy --only hosting
 ```
 
-### GitHub Pages
-1. GitHub 저장소 생성
-2. `index.html` 업로드
-3. Settings → Pages → Branch: main 설정
+Cloudflare를 통해 youthnaroo.xyz 도메인으로 연결되어 있어요.
 
 ---
 
-## 📊 Firestore 데이터 구조
+## 기여자
 
-```
-Firestore
-├── reservations/
-│   └── {weekId}/              예: "2026-W22"
-│       └── {day}/             예: "sat"
-│           └── {hour-room}: {
-│               teamId: "narujigi",
-│               teamName: "나루지기",
-│               userName: "홍길동",
-│               isFixed: false,
-│               createdAt: Timestamp
-│           }
-│
-├── fixed_schedules/
-│   └── {docId}: {
-│       teamId: "narujigi",
-│       teamName: "나루지기",
-│       day: "sat",
-│       hour: "14:00",
-│       room: "나루지기실",
-│       note: "2,4,5주 고정",
-│       createdBy: "관리자",
-│       createdAt: Timestamp
-│   }
-│
-├── audit_logs/
-│   └── {docId}: {
-│       adminName: "관리자이름",
-│       action: "예약_강제취소",
-│       target: "sat 14:00 나루지기실",
-│       before: { ... },
-│       after: null,
-│       timestamp: Timestamp
-│   }
-│
-└── archive/
-    └── {weekId}: {
-        data: { sat: { ... }, sun: { ... }, ... },
-        archivedAt: Timestamp,
-        archivedBy: "관리자이름"
-    }
-```
+> 이 시스템을 함께 만들고 다듬어준 사람들이에요 🙌
+
+<br>
+
+<table>
+  <tr>
+    <td align="center">
+      <img src="photos/park-yeowon.jpg" width="80" height="80" style="border-radius:50%;object-fit:cover;" alt="박여원"><br>
+      <b>박여원</b><br>
+      <sub>
+        <!-- 기여 항목을 여기에 적어주세요 -->
+      </sub>
+    </td>
+    <td align="center">
+      <img src="photos/woo-chaeyeon.jpg" width="80" height="80" style="border-radius:50%;object-fit:cover;" alt="우채연"><br>
+      <b>우채연</b><br>
+      <sub>
+        <!-- 기여 항목을 여기에 적어주세요 -->
+      </sub>
+    </td>
+    <td align="center">
+      <img src="photos/jo-eunseon.jpg" width="80" height="80" style="border-radius:50%;object-fit:cover;" alt="조은선"><br>
+      <b>조은선</b><br>
+      <sub>
+        <!-- 기여 항목을 여기에 적어주세요 -->
+      </sub>
+    </td>
+    <td align="center">
+      <img src="photos/jo-minwoo.jpg" width="80" height="80" style="border-radius:50%;object-fit:cover;" alt="조민우"><br>
+      <b>조민우</b><br>
+      <sub>
+        <!-- 기여 항목을 여기에 적어주세요 -->
+      </sub>
+    </td>
+  </tr>
+</table>
+
+<br>
 
 ---
-
-## ✨ 주요 기능
-
-| 기능 | 설명 |
-|------|------|
-| 🔑 간편 로그인 | 활동단 선택 + 이름 입력만으로 로그인 |
-| 👑 관리자 모드 | 비밀번호 입력으로 관리자 권한 활성화 |
-| ⚡ 실시간 동기화 | Firebase Firestore onSnapshot으로 즉시 반영 |
-| 🔒 중복 예약 방지 | Firestore 트랜잭션으로 동시 예약 차단 |
-| 📌 고정 일정 | 관리자 전용 고정 일정 추가/삭제 |
-| 📋 감사 로그 | 관리자 행동 이력 자동 기록 |
-| 📊 엑셀 내보내기 | 전체 주간 예약 .xlsx 다운로드 |
-| 🔄 주간 리셋 | 일반 예약 초기화 (과거 기록 보관) |
-
----
-
-## ❓ 문의
-
-기능 추가나 오류 문의는 시스템 담당자에게 연락하세요.
 
 © 2026 서울시립마포청소년센터 유스나루

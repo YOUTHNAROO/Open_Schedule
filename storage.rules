@@ -1,0 +1,14 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // 기여자 사진: 인증된 관리자만 업로드, 누구나 읽기
+    match /contributors/{allPaths=**} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+    // 나머지: 인증된 사용자만
+    match /{allPaths=**} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}

@@ -65,5 +65,8 @@ node_modules/
 # dotenv environment variables file
 .env
 
+# 실제 환경 변수 파일 (env.example.js를 복사해서 사용)
+public/env.js
+
 # dataconnect generated files
 .dataconnect

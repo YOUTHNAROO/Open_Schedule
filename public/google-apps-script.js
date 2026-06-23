@@ -11,11 +11,17 @@
  *    - 웹 앱을 실행할 사용자: 나 (스프레드시트 소유자 계정)
  *    - 액세스 권한이 있는 사용자: 모든 사용자 (Anonymous 포함 - 웹페이지에서 API 호출을 받기 위함)
  * 5. 배포 완료 후 생성된 [웹 앱 URL]을 복사하여 유스나루 관리자 페이지의 구글 시트 연동 설정에 입력합니다.
+ * 6. 시트 -> 웹 실시간 반영은 Apps Script의 [트리거]에서 onEdit 설치형 트리거를 추가해야 동작합니다.
  */
 
 // 🔧 환경 설정 (본인의 Firebase 정보로 변경하세요)
 var PROJECT_ID = "youthnarooschedule"; // Firebase 프로젝트 ID
 var SECRET_API_TOKEN = "youthnaroo_secret_token_2026"; // 보안용 API 비밀 토큰 (웹앱과 동일해야 함)
+// 시트 셀 배경색별 담당자 매핑. 예: "#fce8b2": "평생학습팀 장지혜"
+var SHEET_COLOR_OWNERS = {
+  "#ffffff": "",
+  "#000000": ""
+};
 
 // 1. 웹 예약페이지에서 예약/취소 발생 시 시트에 반영 (doPost)
 function doPost(e) {
@@ -166,32 +172,8 @@ function doGet(e) {
     var lastRow = sheet.getLastRow();
     var lastColumn = sheet.getLastColumn();
     var dataRange = sheet.getRange(1, 1, lastRow, lastColumn);
-    var data = dataRange.getValues();
-    
-    // 2. 셀 병합(Merged Cells) 복구: 병합 영역 내 모든 셀에 좌상단 값 채워넣기
-    var mergedRanges = dataRange.getMergedRanges();
-    for (var k = 0; k < mergedRanges.length; k++) {
-      var mRange = mergedRanges[k];
-      var startRow = mRange.getRow();
-      var startCol = mRange.getColumn();
-      var numRows = mRange.getNumRows();
-      var numCols = mRange.getNumColumns();
-      
-      // 인덱스가 data 배열 범위를 벗어나지 않도록 사전 검사
-      if (startRow - 1 < data.length && startCol - 1 < data[startRow - 1].length) {
-        var rootValue = data[startRow - 1][startCol - 1];
-        if (rootValue !== undefined && rootValue !== null) {
-          for (var r = startRow; r < startRow + numRows; r++) {
-            if (r - 1 >= data.length) continue; // 행 범위 안전 가드
-            for (var c = startCol; c < startCol + numCols; c++) {
-              if (data[r - 1] && c - 1 < data[r - 1].length) { // 열 범위 안전 가드
-                data[r - 1][c - 1] = rootValue; // 병합 영역 전체에 좌상단 텍스트 전파
-              }
-            }
-          }
-        }
-      }
-    }
+    var data = getValuesWithMergedCells(dataRange);
+    var backgrounds = getBackgroundsWithMergedCells(dataRange);
     
     var result = {
       sheetName: activeTabName,
@@ -216,23 +198,7 @@ function doGet(e) {
         else if (rowStr.indexOf("토요일") !== -1) currentDay = "토요일";
         else if (rowStr.indexOf("일요일") !== -1) currentDay = "일요일";
         
-        rooms = [];
-        var headerSearchLimit = Math.min(i + 4, data.length);
-        for (var hIdx = i + 1; hIdx < headerSearchLimit; hIdx++) {
-          var hRow = data[hIdx];
-          var hasRooms = false;
-          var tempRooms = [];
-          for (var c = 1; c < hRow.length; c++) {
-            var val = String(hRow[c]).trim();
-            tempRooms.push(val);
-            if (val && val !== "1월" && val !== "2월" && val !== "12월") {
-              hasRooms = true;
-            }
-          }
-          if (hasRooms) {
-            rooms = tempRooms;
-          }
-        }
+        rooms = getRoomsForDay(data, i + 1);
         continue;
       }
       
@@ -243,8 +209,9 @@ function doGet(e) {
           var roomName = rooms[colIdx - 1] || "";
           
           if (cellContent && roomName) {
-            roomName = roomName.split("(")[0].trim();
+            roomName = normalizeSheetRoom(roomName);
             var parsed = parseCellContent(cellContent);
+            var sheetColor = normalizeSheetColor(backgrounds[i][colIdx]);
             
             result.reservations.push({
               day: currentDay,
@@ -252,7 +219,9 @@ function doGet(e) {
               room: roomName,
               teamName: parsed.teamName,
               userName: parsed.userName,
-              note: parsed.note
+              note: parsed.note,
+              sheetColor: sheetColor,
+              sheetOwner: getOwnerByColor(sheetColor)
             });
           }
         }
@@ -295,113 +264,221 @@ function parseCellContent(text) {
   };
 }
 
+function normalizeSheetTime(timeText) {
+  var first = String(timeText || "").split("~")[0].replace(/\s+/g, "").trim();
+  var match = first.match(/^(\d{1,2}):(\d{2})$/);
+  return match ? ("0" + match[1]).slice(-2) + ":" + match[2] : first;
+}
+
+function normalizeSheetRoom(roomText) {
+  return String(roomText || "").split("(")[0].replace(/\s+/g, " ").trim();
+}
+
+function normalizeSheetColor(color) {
+  var c = String(color || "").trim().toLowerCase();
+  return /^#[0-9a-f]{6}$/.test(c) ? c : "";
+}
+
+function getOwnerByColor(color) {
+  var c = normalizeSheetColor(color);
+  return SHEET_COLOR_OWNERS[c] || "";
+}
+
+function isTimeCell(value) {
+  return String(value || "").replace(/\s+/g, "").indexOf(":") !== -1 &&
+    String(value || "").replace(/\s+/g, "").indexOf("~") !== -1;
+}
+
+function getBackgroundsWithMergedCells(dataRange) {
+  var backgrounds = dataRange.getBackgrounds();
+  var mergedRanges = dataRange.getMergedRanges();
+  for (var k = 0; k < mergedRanges.length; k++) {
+    var mRange = mergedRanges[k];
+    var startRow = mRange.getRow();
+    var startCol = mRange.getColumn();
+    var numRows = mRange.getNumRows();
+    var numCols = mRange.getNumColumns();
+    if (startRow - 1 >= backgrounds.length || startCol - 1 >= backgrounds[startRow - 1].length) continue;
+    var rootColor = backgrounds[startRow - 1][startCol - 1];
+    for (var r = startRow; r < startRow + numRows; r++) {
+      if (r - 1 >= backgrounds.length) continue;
+      for (var c = startCol; c < startCol + numCols; c++) {
+        if (backgrounds[r - 1] && c - 1 < backgrounds[r - 1].length) backgrounds[r - 1][c - 1] = rootColor;
+      }
+    }
+  }
+  return backgrounds;
+}
+
+function getValuesWithMergedCells(dataRange) {
+  var data = dataRange.getValues();
+  var mergedRanges = dataRange.getMergedRanges();
+  for (var k = 0; k < mergedRanges.length; k++) {
+    var mRange = mergedRanges[k];
+    var startRow = mRange.getRow();
+    var startCol = mRange.getColumn();
+    var numRows = mRange.getNumRows();
+    var numCols = mRange.getNumColumns();
+    if (startRow - 1 >= data.length || startCol - 1 >= data[startRow - 1].length) continue;
+    var rootValue = data[startRow - 1][startCol - 1];
+    if (rootValue === undefined || rootValue === null) continue;
+    for (var r = startRow; r < startRow + numRows; r++) {
+      if (r - 1 >= data.length) continue;
+      for (var c = startCol; c < startCol + numCols; c++) {
+        if (data[r - 1] && c - 1 < data[r - 1].length) data[r - 1][c - 1] = rootValue;
+      }
+    }
+  }
+  return data;
+}
+
+function getEditBounds(range) {
+  var startRow = range.getRow();
+  var startCol = range.getColumn();
+  var endRow = startRow + range.getNumRows() - 1;
+  var endCol = startCol + range.getNumColumns() - 1;
+  var mergedRanges = range.getMergedRanges();
+  for (var i = 0; i < mergedRanges.length; i++) {
+    var mr = mergedRanges[i];
+    startRow = Math.min(startRow, mr.getRow());
+    startCol = Math.min(startCol, mr.getColumn());
+    endRow = Math.max(endRow, mr.getRow() + mr.getNumRows() - 1);
+    endCol = Math.max(endCol, mr.getColumn() + mr.getNumColumns() - 1);
+  }
+  return { startRow: startRow, startCol: startCol, endRow: endRow, endCol: endCol };
+}
+
+function getDayFromRow(data, rowNumber) {
+  for (var r = rowNumber; r > 0; r--) {
+    var rowStr = data[r - 1].join(" ");
+    if (rowStr.indexOf("요일") !== -1 && (rowStr.indexOf("년") !== -1 || rowStr.indexOf("월") !== -1)) {
+      var day = "";
+      if (rowStr.indexOf("월요일") !== -1) day = "월요일";
+      else if (rowStr.indexOf("화요일") !== -1) day = "화요일";
+      else if (rowStr.indexOf("수요일") !== -1) day = "수요일";
+      else if (rowStr.indexOf("목요일") !== -1) day = "목요일";
+      else if (rowStr.indexOf("금요일") !== -1) day = "금요일";
+      else if (rowStr.indexOf("토요일") !== -1) day = "토요일";
+      else if (rowStr.indexOf("일요일") !== -1) day = "일요일";
+      return { day: day, dayStartRow: r };
+    }
+  }
+  return { day: "", dayStartRow: -1 };
+}
+
+function getRoomsForDay(data, dayStartRow) {
+  var rooms = [];
+  var headerSearchLimit = Math.min(dayStartRow + 4, data.length);
+  for (var hIdx = dayStartRow; hIdx < headerSearchLimit; hIdx++) {
+    var hRow = data[hIdx];
+    if (!hRow || isTimeCell(hRow[0])) break;
+    var hasRooms = false;
+    var tempRooms = [];
+    for (var c = 1; c < hRow.length; c++) {
+      var rawVal = normalizeSheetRoom(hRow[c]);
+      var val = /^\d{1,2}월$/.test(rawVal) ? "" : rawVal;
+      tempRooms.push(val);
+      if (val) hasRooms = true;
+    }
+    if (hasRooms) rooms = tempRooms;
+  }
+  return rooms;
+}
+
+function fetchFirestore(url, options) {
+  options = options || {};
+  options.muteHttpExceptions = true;
+  options.headers = options.headers || {};
+  options.headers.Authorization = "Bearer " + ScriptApp.getOAuthToken();
+  var res = UrlFetchApp.fetch(url, options);
+  var code = res.getResponseCode();
+  if (code < 200 || code >= 300) {
+    throw new Error("Firestore sync failed (" + code + "): " + res.getContentText());
+  }
+  return res;
+}
+
+function upsertReservationDoc(weekId, dayId, resId, parsed) {
+  var url = "https://firestore.googleapis.com/v1/projects/" + PROJECT_ID + "/databases/(default)/documents/reservations/" + weekId + "/" + dayId + "/" + encodeURIComponent(resId);
+  var payload = {
+    fields: {
+      apiToken: { stringValue: SECRET_API_TOKEN },
+      teamId: { stringValue: getTeamIdByName(parsed.teamName) || "external" },
+      teamName: { stringValue: parsed.teamName },
+      userName: { stringValue: parsed.userName },
+      note: { stringValue: parsed.note },
+      sheetColor: { stringValue: parsed.sheetColor || "" },
+      sheetOwner: { stringValue: parsed.sheetOwner || "" },
+      isFixed: { booleanValue: false }
+    }
+  };
+  fetchFirestore(url + "?updateMask.fieldPaths=apiToken&updateMask.fieldPaths=teamId&updateMask.fieldPaths=teamName&updateMask.fieldPaths=userName&updateMask.fieldPaths=note&updateMask.fieldPaths=sheetColor&updateMask.fieldPaths=sheetOwner&updateMask.fieldPaths=isFixed", {
+    method: "patch",
+    contentType: "application/json",
+    payload: JSON.stringify(payload)
+  });
+}
+
+function deleteReservationDoc(weekId, dayId, resId) {
+  var url = "https://firestore.googleapis.com/v1/projects/" + PROJECT_ID + "/databases/(default)/documents/reservations/" + weekId + "/" + dayId + "/" + encodeURIComponent(resId);
+  try {
+    fetchFirestore(url, { method: "delete" });
+  } catch (err) {
+    if (String(err).indexOf("(404)") === -1) throw err;
+  }
+}
+
 // 2. 시트 내용 직접 편집 시 Firestore에 실시간 반영 (onEdit Trigger) - 셀 병합 일괄 처리
 function onEdit(e) {
+  if (!e || !e.range) return;
   var range = e.range;
   var sheet = range.getSheet();
   var activeTabName = getActiveTabFromFirebase() || "2026년 6월";
   
   if (sheet.getName() !== activeTabName) return;
   
-  var startRow = range.getRow();
-  var startCol = range.getColumn();
-  var numRows = range.getNumRows();
-  var numCols = range.getNumColumns();
-  var newValue = range.getValue().toString().trim();
+  var bounds = getEditBounds(range);
+  var startRow = bounds.startRow;
+  var startCol = bounds.startCol;
+  var endRow = bounds.endRow;
+  var endCol = bounds.endCol;
   
   // 헤더나 시간대 열 수정은 스킵
   if (startCol === 1 || startRow < 5) return;
   
   var lastRow = sheet.getLastRow();
   var lastColumn = sheet.getLastColumn();
-  var data = sheet.getRange(1, 1, lastRow, lastColumn).getValues();
-  
-  // 요일 찾기 (startRow 기준 위로 올라감)
-  var day = "";
-  var dayStartRow = -1;
-  for (var r = startRow; r > 0; r--) {
-    var rStr = data[r - 1].join(" ");
-    if (rStr.indexOf("요일") !== -1 && (rStr.indexOf("년") !== -1 || rStr.indexOf("월") !== -1)) {
-      dayStartRow = r;
-      if (rStr.indexOf("월요일") !== -1) day = "월요일";
-      else if (rStr.indexOf("화요일") !== -1) day = "화요일";
-      else if (rStr.indexOf("수요일") !== -1) day = "수요일";
-      else if (rStr.indexOf("목요일") !== -1) day = "목요일";
-      else if (rStr.indexOf("금요일") !== -1) day = "금요일";
-      else if (rStr.indexOf("토요일") !== -1) day = "토요일";
-      else if (rStr.indexOf("일요일") !== -1) day = "일요일";
-      break;
-    }
-  }
-  
-  if (!day || dayStartRow === -1) return;
-  
-  // 공간 목록 추출
-  var rooms = [];
-  var headerSearchLimit = Math.min(dayStartRow + 4, data.length);
-  for (var hIdx = dayStartRow; hIdx < headerSearchLimit; hIdx++) {
-    var hRow = data[hIdx];
-    var hasRooms = false;
-    var tempRooms = [];
-    for (var c = 1; c < hRow.length; c++) {
-      var val = String(hRow[c]).trim();
-      tempRooms.push(val);
-      if (val && val !== "1월" && val !== "2월" && val !== "12월") {
-        hasRooms = true;
-      }
-    }
-    if (hasRooms) {
-      rooms = tempRooms;
-    }
-  }
+  var dataRange = sheet.getRange(1, 1, lastRow, lastColumn);
+  var data = getValuesWithMergedCells(dataRange);
+  var backgrounds = getBackgroundsWithMergedCells(dataRange);
   
   // 병합된 모든 개별 셀의 예약 상태를 Firestore에 순차 갱신 (병합 셀 일괄 동기화)
   var weekId = getWeekId(new Date());
-  var dayId = getDayId(day);
   
-  for (var currR = startRow; currR < startRow + numRows; currR++) {
-    for (var currC = startCol; currC < startCol + numCols; currC++) {
-      var curTimeRaw = data[currR - 1][0].toString().trim();
+  for (var currR = startRow; currR <= endRow; currR++) {
+    var dayInfo = getDayFromRow(data, currR);
+    if (!dayInfo.day || dayInfo.dayStartRow === -1) continue;
+    var dayId = getDayId(dayInfo.day);
+    var rooms = getRoomsForDay(data, dayInfo.dayStartRow);
+    var curTimeRaw = String(data[currR - 1][0] || "").trim();
+    if (curTimeRaw.indexOf(":") === -1 || curTimeRaw.indexOf("~") === -1) continue;
+    var cleanTime = normalizeSheetTime(curTimeRaw);
+
+    for (var currC = startCol; currC <= endCol; currC++) {
       var curRoom = rooms[currC - 2] || "";
-      if (!curRoom || curTimeRaw.indexOf(":") === -1 || curTimeRaw.indexOf("~") === -1) continue;
-      curRoom = curRoom.split("(")[0].trim();
-      
-      // 시간 형식 표준화 (예: "09:00~09:50" -> "09:00")
-      var cleanTime = curTimeRaw.split("~")[0].trim();
+      if (!curRoom) continue;
+      curRoom = normalizeSheetRoom(curRoom);
       var resId = (cleanTime + "-" + curRoom).replace(/\//g, "_");
-      var url = "https://firestore.googleapis.com/v1/projects/" + PROJECT_ID + "/databases/(default)/documents/reservations/" + weekId + "/" + dayId + "/" + resId;
-      
-      var options = {
-        method: "patch",
-        contentType: "application/json",
-        muteHttpExceptions: true
-      };
-      
-      if (newValue === "") {
-        var payload = {
-          fields: {
-            apiToken: { stringValue: SECRET_API_TOKEN },
-            teamId: { nullValue: null },
-            teamName: { stringValue: "" },
-            userName: { stringValue: "" },
-            note: { stringValue: "" }
-          }
-        };
-        options.payload = JSON.stringify(payload);
-        UrlFetchApp.fetch(url + "?updateMask.fieldPaths=apiToken&updateMask.fieldPaths=teamId&updateMask.fieldPaths=teamName&updateMask.fieldPaths=userName&updateMask.fieldPaths=note", options);
+
+      var cellValue = String(data[currR - 1][currC - 1] || "").trim();
+      if (cellValue === "") {
+        deleteReservationDoc(weekId, dayId, resId);
       } else {
-        var parsed = parseCellContent(newValue);
-        var payload = {
-          fields: {
-            apiToken: { stringValue: SECRET_API_TOKEN },
-            teamId: { stringValue: getTeamIdByName(parsed.teamName) || "external" },
-            teamName: { stringValue: parsed.teamName },
-            userName: { stringValue: parsed.userName },
-            note: { stringValue: parsed.note }
-          }
-        };
-        options.payload = JSON.stringify(payload);
-        UrlFetchApp.fetch(url + "?updateMask.fieldPaths=apiToken&updateMask.fieldPaths=teamId&updateMask.fieldPaths=teamName&updateMask.fieldPaths=userName&updateMask.fieldPaths=note", options);
+        var parsed = parseCellContent(cellValue);
+        var sheetColor = normalizeSheetColor(backgrounds[currR - 1][currC - 1]);
+        parsed.sheetColor = sheetColor;
+        parsed.sheetOwner = getOwnerByColor(sheetColor);
+        upsertReservationDoc(weekId, dayId, resId, parsed);
       }
     }
   }
@@ -416,7 +493,7 @@ function getDayId(dayText) {
 // 등록된 이름 매칭 헬퍼
 function getTeamIdByName(name) {
   var map = {
-    "나루지기": "narui",
+    "나루지기": "narujigi",
     "다힘": "dahim",
     "진로스토리텔러": "story",
     "대학생미디어": "ynbc-univ",
@@ -432,7 +509,7 @@ function getTeamIdByName(name) {
 function getActiveTabFromFirebase() {
   try {
     var url = "https://firestore.googleapis.com/v1/projects/" + PROJECT_ID + "/databases/(default)/documents/system_settings/google_sheets";
-    var res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+    var res = fetchFirestore(url, { method: "get" });
     if (res.getResponseCode() === 200) {
       var json = JSON.parse(res.getContentText());
       if (json.fields && json.fields.activeTabName) {

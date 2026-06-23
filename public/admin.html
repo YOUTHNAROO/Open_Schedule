@@ -22,8 +22,9 @@
     } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
     import {
       getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged,
-      createUserWithEmailAndPassword
+      createUserWithEmailAndPassword, updatePassword
     } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+    import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
 
     // ========== FIREBASE CONFIG ==========
     const firebaseConfig = {
@@ -40,6 +41,7 @@
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
     const auth = getAuth(app);
+    const storage = getStorage(app);
 
     // Global error logging for debugging client-side errors
     window.addEventListener('error', (e) => {
@@ -56,8 +58,8 @@
       { id: 'mon', label: '월요일' }, { id: 'tue', label: '화요일' }, { id: 'wed', label: '수요일' },
       { id: 'thu', label: '목요일' }, { id: 'fri', label: '금요일' }, { id: 'sat', label: '토요일' }, { id: 'sun', label: '일요일' }
     ];
-    const HOURS = ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00'];
-    const ALL_ROOMS = ['수영장', '소리나루', '나루지기실', '콤마스튜디오', '꿈나루실', '링키실', '방송미디어나루', '스튜디오M', '스튜디오H', '체육관'];
+    const HOURS = ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00', '21:00'];
+    const ALL_ROOMS = ['체육관', '건강나루', '피아노나루', '소리나루', '상상나루', '생각나루', '창의나루', '세미나실', '키움나루', '사랑나루', '나루지기', '멀티미디어', '콤마', '콤마 스튜디오', '링키', '행복나루', '동행나루', '신나루', '빛나루', '미디어나루', '방송나루', '스튜디오M', '스튜디오H'];
     const ROLE_LABELS = { superadmin: '👑 주관리자', admin: '🔧 관리자', user: '👤 일반사용자' };
     const ROLE_COLORS = { superadmin: 'bg-amber-100 text-amber-700 border-amber-300', admin: 'bg-blue-100 text-blue-700 border-blue-300', user: 'bg-slate-100 text-slate-600 border-slate-300' };
     const COLOR_OPTIONS = [
@@ -80,19 +82,21 @@
     ];
 
     const DEFAULT_TEAMS = [
-      { id: 'narujigi', name: '나루지기', fullType: '청소년운영위원회', schedule: '2,4,5주 토요일 14:00~17:00', typicalRooms: ['나루지기실'], bg: 'bg-amber-100', text: 'text-amber-800', border: 'border-amber-300', isActive: true },
-      { id: 'dahim', name: '다힘', fullType: '공연동아리연합회', schedule: '평일 저녁/주말', typicalRooms: ['콤마스튜디오', '소리나루'], bg: 'bg-sky-100', text: 'text-sky-800', border: 'border-sky-300', isActive: true },
-      { id: 'story', name: '진로스토리텔러', fullType: '전문가 연합 활동단', schedule: '2,4주 토요일 14:00~17:00', typicalRooms: ['링키실', '꿈나루실'], bg: 'bg-emerald-100', text: 'text-emerald-800', border: 'border-emerald-300', isActive: true },
-      { id: 'ynbc-univ', name: '대학생미디어', fullType: 'YNBC 대학생미디어활동단', schedule: '매주 금요일 14:00~17:00', typicalRooms: ['방송미디어나루', '스튜디오M', '스튜디오H'], bg: 'bg-indigo-100', text: 'text-indigo-800', border: 'border-indigo-300', isActive: true },
-      { id: 'mascot', name: '마스코트', fullType: '마포구청소년축제기획단', schedule: '2,4주 토요일 14:00~17:00', typicalRooms: ['꿈나루실'], bg: 'bg-blue-100', text: 'text-blue-800', border: 'border-blue-300', isActive: true },
-      { id: 'mulyuol', name: '물여울', fullType: '수영동아리', schedule: '매주 토요일 09:00~11:00', typicalRooms: ['수영장'], bg: 'bg-cyan-100', text: 'text-cyan-800', border: 'border-cyan-300', isActive: true },
+      { id: 'narujigi', name: '나루지기', fullType: '청소년운영위원회', schedule: '2,4,5주 토요일 14:00~17:00', typicalRooms: ['나루지기'], bg: 'bg-amber-100', text: 'text-amber-800', border: 'border-amber-300', isActive: true },
+      { id: 'dahim', name: '다힘', fullType: '공연동아리연합회', schedule: '평일 저녁/주말', typicalRooms: ['콤마 스튜디오', '소리나루'], bg: 'bg-sky-100', text: 'text-sky-800', border: 'border-sky-300', isActive: true },
+      { id: 'story', name: '진로스토리텔러', fullType: '전문가 연합 활동단', schedule: '2,4주 토요일 14:00~17:00', typicalRooms: ['링키', '상상나루'], bg: 'bg-emerald-100', text: 'text-emerald-800', border: 'border-emerald-300', isActive: true },
+      { id: 'ynbc-univ', name: '대학생미디어', fullType: 'YNBC 대학생미디어활동단', schedule: '매주 금요일 14:00~17:00', typicalRooms: ['방송나루', '스튜디오M', '스튜디오H'], bg: 'bg-indigo-100', text: 'text-indigo-800', border: 'border-indigo-300', isActive: true },
+      { id: 'mascot', name: '마스코트', fullType: '마포구청소년축제기획단', schedule: '2,4주 토요일 14:00~17:00', typicalRooms: ['상상나루'], bg: 'bg-blue-100', text: 'text-blue-800', border: 'border-blue-300', isActive: true },
+      { id: 'mulyuol', name: '물여울', fullType: '수영동아리', schedule: '매주 토요일 09:00~11:00', typicalRooms: ['건강나루'], bg: 'bg-cyan-100', text: 'text-cyan-800', border: 'border-cyan-300', isActive: true },
       { id: 'halftime', name: '하프타임', fullType: '농구동아리', schedule: '매주 토요일 15:00~17:00', typicalRooms: ['체육관'], bg: 'bg-orange-100', text: 'text-orange-800', border: 'border-orange-300', isActive: true },
-      { id: 'ynbc', name: '청소년방송국', fullType: 'YNBC 유스나루청소년방송국', schedule: '1,3주 토요일 14:00~17:00', typicalRooms: ['방송미디어나루', '스튜디오M', '스튜디오H'], bg: 'bg-purple-100', text: 'text-purple-800', border: 'border-purple-300', isActive: true },
+      { id: 'ynbc', name: '청소년방송국', fullType: 'YNBC 유스나루청소년방송국', schedule: '1,3주 토요일 14:00~17:00', typicalRooms: ['방송나루', '스튜디오M', '스튜디오H'], bg: 'bg-purple-100', text: 'text-purple-800', border: 'border-purple-300', isActive: true },
     ];
 
     // ========== STATE ==========
     let TEAMS = [...DEFAULT_TEAMS];
     let currentUser = null;
+    let teamLeaderIds = [];
+    let teamLeaderUsers = [];
     let activeTab = 'dashboard';
     let clientIP = '알 수 없음';
     let logPage = { login: 1, activity: 1 };
@@ -136,6 +140,14 @@
     function isSuperAdmin() { return currentUser?.role === 'superadmin'; }
     function isAdminOrSuper() { return currentUser && (currentUser.role === 'admin' || currentUser.role === 'superadmin'); }
     function esc(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+    function normalizeSheetTime(time) {
+      const first = String(time || '').split('~')[0].replace(/\s+/g, '').trim();
+      const match = first.match(/^(\d{1,2}):(\d{2})$/);
+      return match ? `${match[1].padStart(2, '0')}:${match[2]}` : first;
+    }
+    function normalizeSheetRoom(room) {
+      return String(room || '').split('(')[0].replace(/\s+/g, ' ').trim();
+    }
     function fmtTime(ts) {
       if (!ts) return '-';
       const d = typeof ts === 'string' ? new Date(ts) : (ts.seconds ? new Date(ts.seconds * 1000) : new Date(ts));
@@ -158,6 +170,29 @@
     }
     function showModal(id) { document.getElementById(id)?.classList.remove('hidden'); }
     function hideModal(id) { document.getElementById(id)?.classList.add('hidden'); }
+
+    function showConfirm(msg, { title = '확인', okText = '확인', danger = false } = {}) {
+      return new Promise(resolve => {
+        const modal = document.getElementById('confirm-modal');
+        const titleEl = document.getElementById('confirm-modal-title');
+        const msgEl = document.getElementById('confirm-modal-msg');
+        const okBtn = document.getElementById('confirm-modal-ok');
+        const cancelBtn = document.getElementById('confirm-modal-cancel');
+        const header = document.getElementById('confirm-modal-header');
+        if (!modal) { resolve(window.confirm(msg)); return; }
+        if (titleEl) titleEl.textContent = title;
+        if (msgEl) msgEl.textContent = msg;
+        if (okBtn) { okBtn.textContent = okText; okBtn.className = `flex-1 py-2.5 rounded-xl text-sm font-bold text-white transition-colors ${danger ? 'bg-red-600 hover:bg-red-700' : 'bg-teal-600 hover:bg-teal-700'}`; }
+        if (header) header.className = `h-1.5 w-full ${danger ? 'bg-red-500' : 'bg-amber-400'}`;
+        modal.classList.remove('hidden');
+        lucide.createIcons();
+        const cleanup = () => modal.classList.add('hidden');
+        okBtn.onclick = () => { cleanup(); resolve(true); };
+        cancelBtn.onclick = () => { cleanup(); resolve(false); };
+        document.getElementById('confirm-modal-backdrop')?.addEventListener('click', () => { cleanup(); resolve(false); }, { once: true });
+      });
+    }
+    window.showConfirm = showConfirm;
 
     async function fetchIP() {
       try { clientIP = (await (await fetch('https://api.ipify.org?format=json')).json()).ip; } catch { }
@@ -284,7 +319,7 @@
     }
 
     // ========== USER CRUD ==========
-    async function createUser({ username, displayName, password, role, allowedTeams, isActive }) {
+    async function createUser({ username, displayName, password, role, allowedTeams, isActive, photoUrl }) {
       const email = `${username}@youthnaroo.local`;
 
       // 보조 앱을 사용하여 관리자 세션 유지하며 계정 생성
@@ -301,6 +336,7 @@
 
         const ref = doc(db, 'users', newUid);
         const userData = { username, displayName, role, allowedTeams, isActive, createdAt: serverTimestamp(), createdBy: currentUser.displayName };
+        if (photoUrl) userData.photoUrl = photoUrl;
         await setDoc(ref, userData);
         await addActivityLog('사용자_생성', username, null, { role, allowedTeams });
       } catch (err) {
@@ -311,11 +347,15 @@
       }
     }
 
-    async function updateUser(id, { displayName, role, allowedTeams, isActive }, oldData = {}) {
+    async function updateUser(id, { displayName, role, allowedTeams, isActive, newPassword, photoUrl }, oldData = {}) {
       const upd = { displayName, role, allowedTeams, isActive, updatedAt: serverTimestamp() };
+      if (newPassword && newPassword.length >= 6) {
+        upd.pendingPasswordChange = newPassword;
+      }
+      if (photoUrl !== undefined) upd.photoUrl = photoUrl;
       await updateDoc(doc(db, 'users', id), upd);
       const oldUsername = oldData?.username || '알수없음';
-      await addActivityLog('사용자_수정', oldUsername, oldData || null, { displayName, role, allowedTeams, isActive });
+      await addActivityLog('사용자_수정', oldUsername, oldData || null, { displayName, role, allowedTeams, isActive, passwordChanged: !!(newPassword) });
     }
 
     async function deleteUser(id, username) {
@@ -377,7 +417,122 @@
       else if (tab === 'activity-logs') await renderActivityLogs(logPage.activity);
       else if (tab === 'archive') await renderArchive();
       else if (tab === 'sheets') await renderSheetsSettings();
+      else if (tab === 'invite-codes') await renderInviteCodes();
+      else if (tab === 'contributors') await renderContributors();
     }
+
+    // ========== RENDER: INVITE CODES ==========
+    function genCode() {
+      const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+      return Array.from(crypto.getRandomValues(new Uint8Array(8))).map(b => chars[b % chars.length]).join('');
+    }
+
+    async function renderInviteCodes() {
+      const panel = document.getElementById('panel-invite-codes');
+      if (!panel) return;
+      panel.innerHTML = `<div class="text-center py-16 text-slate-400"><div class="w-8 h-8 border-4 border-slate-200 border-t-teal-500 rounded-full animate-spin mx-auto mb-4"></div>로딩 중...</div>`;
+
+      const snap = await getDocs(query(collection(db, 'invite_codes'), orderBy('createdAt', 'desc'), limit(100)));
+      const codes = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+      panel.innerHTML = `
+        <div class="mb-6 flex flex-wrap gap-3 items-center">
+          <h2 class="text-lg font-bold text-slate-800 flex-1">초대코드 관리</h2>
+          <div class="flex gap-2 flex-wrap">
+            <select id="ic-role" class="px-3 py-2 text-sm border border-slate-200 rounded-xl bg-white">
+              <option value="user">일반 사용자</option>
+              <option value="admin">관리자</option>
+            </select>
+            <input id="ic-target-user" type="text" placeholder="지정 사용자 (선택)" class="px-3 py-2 text-sm border border-slate-200 rounded-xl bg-white w-36" title="특정 아이디만 사용 가능하도록 지정">
+            <button onclick="exportInviteCodesExcel()" class="px-4 py-2 bg-slate-600 hover:bg-slate-700 text-white text-sm font-bold rounded-xl transition-colors flex items-center gap-1.5">
+              <i data-lucide="download" class="w-4 h-4"></i> 엑셀
+            </button>
+            <button id="ic-gen-btn" class="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white text-sm font-bold rounded-xl transition-colors flex items-center gap-1.5">
+              <i data-lucide="plus" class="w-4 h-4"></i> 코드 생성
+            </button>
+          </div>
+        </div>
+        <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          <table class="w-full text-sm border-collapse">
+            <thead class="bg-slate-50 border-b border-slate-200">
+              <tr>
+                <th class="text-left px-4 py-3 text-xs font-bold text-slate-500">코드</th>
+                <th class="text-left px-4 py-3 text-xs font-bold text-slate-500">권한</th>
+                <th class="text-left px-4 py-3 text-xs font-bold text-slate-500">상태</th>
+                <th class="text-left px-4 py-3 text-xs font-bold text-slate-500">사용자</th>
+                <th class="text-left px-4 py-3 text-xs font-bold text-slate-500">지정 사용자</th>
+                <th class="text-left px-4 py-3 text-xs font-bold text-slate-500">생성일</th>
+                <th class="px-4 py-3"></th>
+              </tr>
+            </thead>
+            <tbody>
+              ${codes.length === 0 ? `<tr><td colspan="7" class="text-center py-12 text-slate-400 text-sm">생성된 초대코드가 없습니다.</td></tr>` : codes.map(c => `
+              <tr class="border-b border-slate-100 hover:bg-slate-50 transition-colors">
+                <td class="px-4 py-3 font-mono font-bold text-slate-800 tracking-widest">${esc(c.id)}</td>
+                <td class="px-4 py-3">
+                  <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${c.role === 'admin' ? 'bg-amber-100 text-amber-700' : 'bg-teal-100 text-teal-700'}">${c.role === 'admin' ? '관리자' : '일반'}</span>
+                </td>
+                <td class="px-4 py-3">
+                  <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${c.isUsed ? 'bg-slate-100 text-slate-500' : 'bg-green-100 text-green-700'}">${c.isUsed ? '사용됨' : '사용 가능'}</span>
+                </td>
+                <td class="px-4 py-3 text-slate-600 text-xs">${c.usedBy ? esc(c.usedBy) : '-'}</td>
+                <td class="px-4 py-3 text-slate-600 text-xs">${c.targetUsername ? `<span class="px-1.5 py-0.5 bg-indigo-50 text-indigo-700 rounded font-mono text-[10px]">${esc(c.targetUsername)}</span>` : '-'}</td>
+                <td class="px-4 py-3 text-slate-400 text-xs">${c.createdAt?.toDate ? c.createdAt.toDate().toLocaleDateString('ko-KR') : '-'}</td>
+                <td class="px-4 py-3 text-right">
+                  ${!c.isUsed ? `<button onclick="revokeInviteCode('${esc(c.id)}')" class="text-xs text-red-500 hover:text-red-700 border border-red-200 hover:border-red-400 px-2.5 py-1 rounded-lg transition-colors">취소</button>` : ''}
+                </td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>`;
+
+      document.getElementById('ic-gen-btn')?.addEventListener('click', async () => {
+        const role = document.getElementById('ic-role')?.value || 'user';
+        const targetUsername = document.getElementById('ic-target-user')?.value.trim() || null;
+        const code = genCode();
+        await setDoc(doc(db, 'invite_codes', code), {
+          role, allowedTeams: [], isUsed: false,
+          targetUsername,
+          createdBy: currentUser?.username || 'admin',
+          createdAt: serverTimestamp(), usedBy: null, usedAt: null
+        });
+        showToast(`초대코드 생성: ${code}`, 'success');
+        await renderInviteCodes();
+      });
+      lucide.createIcons();
+    }
+
+    window.revokeInviteCode = async function(code) {
+      if (!await showConfirm(`초대코드 ${code}를 삭제하시겠습니까?`, { title: '초대코드 삭제', okText: '삭제', danger: true })) return;
+      await addDoc(collection(db, 'invite_code_logs'), {
+        code, action: 'revoked',
+        revokedBy: currentUser?.username || 'admin',
+        revokedByName: currentUser?.displayName || '',
+        revokedAt: serverTimestamp()
+      });
+      await deleteDoc(doc(db, 'invite_codes', code));
+      showToast('초대코드가 삭제되었습니다.', 'success');
+      renderInviteCodes();
+    };
+
+    window.exportInviteCodesExcel = async function() {
+      const snap = await getDocs(query(collection(db, 'invite_codes'), orderBy('createdAt', 'desc'), limit(500)));
+      const rows = snap.docs.map(d => {
+        const c = { id: d.id, ...d.data() };
+        return {
+          코드: c.id,
+          권한: c.role === 'admin' ? '관리자' : '일반',
+          상태: c.isUsed ? '사용됨' : '사용 가능',
+          사용자: c.usedBy || '',
+          지정사용자: c.targetUsername || '',
+          생성일: c.createdAt?.toDate ? c.createdAt.toDate().toLocaleDateString('ko-KR') : '',
+          사용일: c.usedAt?.toDate ? c.usedAt.toDate().toLocaleDateString('ko-KR') : '',
+        };
+      });
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), '초대코드');
+      XLSX.writeFile(wb, '초대코드목록.xlsx');
+    };
 
     // ========== RENDER: DASHBOARD ==========
     async function renderDashboard() {
@@ -844,10 +999,14 @@
                 </div>
                 <div class="flex gap-2">
                   <span class="bg-teal-500/20 text-teal-300 px-1.5 py-0.5 rounded text-[10px] font-bold h-fit">Step 4</span>
+                  <span>Apps Script <b>프로젝트 설정</b>에서 <b>appsscript.json 매니페스트 파일 표시</b>를 켜고, <code>oauthScopes</code>에 <code>https://www.googleapis.com/auth/datastore</code>, <code>https://www.googleapis.com/auth/spreadsheets.currentonly</code>, <code>https://www.googleapis.com/auth/script.external_request</code>를 포함합니다.</span>
+                </div>
+                <div class="flex gap-2">
+                  <span class="bg-teal-500/20 text-teal-300 px-1.5 py-0.5 rounded text-[10px] font-bold h-fit">Step 5</span>
                   <span>상단 <b>[배포] -> [새 배포]</b>에서 <b>유형: 웹 앱</b>을 지정하고, 액세스 권한을 <b>[모든 사용자]</b>로 배포하여 URL을 획득하고 등록합니다.</span>
                 </div>
                 <div class="flex gap-2">
-                  <span class="bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded text-[10px] font-bold h-fit">Step 5</span>
+                  <span class="bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded text-[10px] font-bold h-fit">Step 6</span>
                   <span class="text-amber-300 font-semibold">⚠️ 필수: 단순 <code>onEdit</code> 스크립트는 보안상 외부 통신이 차단됩니다. 반드시 Apps Script 왼쪽 메뉴의 ⏰ [트리거] 탭 -> [새 트리거 추가] -> 실행할 함수: <b>onEdit</b> / 이벤트 소스: <b>스프레드시트</b> / 이벤트 유형: <b>수정 시</b>로 하는 [설치형 트리거]를 수동 등록해야 시트 수정사항이 실시간으로 예약페이지에 반영됩니다!</span>
                 </div>
               </div>
@@ -891,7 +1050,7 @@
           if (!gasUrl) { showToast('먼저 Apps Script 웹 앱 URL을 입력해 주세요.', 'error'); return; }
           if (!activeTabName || activeTabName === '시트 선택') { showToast('동기화할 시트 탭 이름을 선택해 주세요.', 'error'); return; }
           
-          if (!confirm(`[경고] 구글 시트의 '${activeTabName}' 탭 데이터로 웹 예약 테이블 데이터를 덮어씁니다.\n기존 웹에만 수동 등록되었던 일반 예약 데이터는 지워집니다. 진행하시겠습니까?`)) {
+          if (!await showConfirm(`'${activeTabName}' 탭 데이터로 웹 예약을 덮어씁니다.\n웹에만 등록된 예약 데이터는 삭제됩니다.`, { title: '⚠️ 시트 데이터 덮어쓰기', okText: '덮어쓰기', danger: true })) {
             return;
           }
           
@@ -941,9 +1100,10 @@
               const batch = writeBatch(db);
               const list = reservationsByDay[dId];
               list.forEach(r => {
-                // 시간 형식 표준화 (예: "09:00~09:50" -> "09:00")
-                const cleanTime = r.time.split('~')[0].trim();
-                const key = `${cleanTime}-${r.room}`.replace(/\//g, '_');
+                const cleanTime = normalizeSheetTime(r.time);
+                const roomName = normalizeSheetRoom(r.room);
+                if (!HOURS.includes(cleanTime) || !ALL_ROOMS.includes(roomName)) return;
+                const key = `${cleanTime}-${roomName}`.replace(/\//g, '_');
                 const docRef = doc(db, `reservations/${currentWeekId}/${dId}`, key);
                 
                 const matchedTeam = TEAMS.find(t => t.name === r.teamName);
@@ -953,7 +1113,11 @@
                   teamId: teamId,
                   teamName: r.teamName,
                   userName: r.userName || '외부예약',
+                  room: roomName,
+                  hour: cleanTime,
                   note: r.note || '',
+                  sheetColor: r.sheetColor || '',
+                  sheetOwner: r.sheetOwner || '',
                   apiToken: 'youthnaroo_secret_token_2026',
                   updatedAt: serverTimestamp()
                 });
@@ -1027,23 +1191,14 @@
       document.getElementById('user-displayname').value = user?.displayName || '';
       document.getElementById('user-password').value = '';
       
-      const isSelf = uid === currentUser?.id;
       const passEl = document.getElementById('user-password');
       const passTipEl = document.getElementById('user-password-tip');
-      
+      passEl.disabled = false;
       if (isEdit) {
-        if (isSelf) {
-          passEl.disabled = false;
-          passEl.placeholder = '변경 시에만 입력';
-          if (passTipEl) passTipEl.classList.add('hidden');
-        } else {
-          passEl.disabled = true;
-          passEl.placeholder = 'Firebase Console에서 변경 가능';
-          if (passTipEl) passTipEl.classList.remove('hidden');
-        }
+        passEl.placeholder = '변경 시에만 입력 (6자 이상)';
+        if (passTipEl) { passTipEl.textContent = '💡 새 비밀번호 입력 시 사용자 다음 로그인 시 적용됩니다.'; passTipEl.classList.remove('hidden'); }
       } else {
-        passEl.disabled = false;
-        passEl.placeholder = '비밀번호 (필수)';
+        passEl.placeholder = '비밀번호 (필수, 6자 이상)';
         if (passTipEl) passTipEl.classList.add('hidden');
       }
       
@@ -1051,11 +1206,21 @@
       document.getElementById('user-is-active').checked = user?.isActive !== false;
       document.getElementById('user-teams-cb').innerHTML = teamCbs;
       document.getElementById('user-role').dispatchEvent(new Event('change'));
+      const photoFileEl = document.getElementById('user-photo-file');
+      if (photoFileEl) photoFileEl.value = '';
+      const previewEl = document.getElementById('user-photo-preview');
+      if (previewEl) {
+        previewEl.innerHTML = user?.photoUrl
+          ? `<img src="${esc(user.photoUrl)}" class="w-full h-full object-cover">`
+          : `<i data-lucide="user" class="w-6 h-6 text-slate-300"></i>`;
+      }
+      const photoStatusEl = document.getElementById('user-photo-status');
+      if (photoStatusEl) photoStatusEl.textContent = '';
       showModal('user-modal');
     };
 
-    window.confirmDeleteUser = function (uid, username) {
-      if (!confirm(`⚠️ 사용자 [${username}]를 삭제하시겠습니까?\n\n삭제 후 복구할 수 없습니다.`)) return;
+    window.confirmDeleteUser = async function (uid, username) {
+      if (!await showConfirm(`사용자 [${username}]를 삭제합니다.\n삭제 후 복구할 수 없습니다.`, { title: '사용자 삭제', okText: '삭제', danger: true })) return;
       deleteUser(uid, username).then(() => { showToast('사용자가 삭제되었습니다.', 'success'); renderUsers(); }).catch(e => showToast(e.message, 'error'));
     };
 
@@ -1070,8 +1235,25 @@
       window.confirmDeleteUser(uid, username);
     };
 
+    function renderLeaderChips() {
+      const container = document.getElementById('team-leaders-selected');
+      if (!container) return;
+      container.innerHTML = teamLeaderIds.map(uid => {
+        const u = teamLeaderUsers.find(x => x.id === uid);
+        const label = u ? esc(u.displayName || u.username) : uid;
+        return `<span class="inline-flex items-center gap-1 text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded-lg font-medium">
+          ${label}
+          <button type="button" onclick="removeTeamLeader('${uid}')" class="text-indigo-400 hover:text-indigo-700 font-bold leading-none ml-0.5">&times;</button>
+        </span>`;
+      }).join('');
+    }
+    window.removeTeamLeader = function(uid) {
+      teamLeaderIds = teamLeaderIds.filter(id => id !== uid);
+      renderLeaderChips();
+    };
+
     // ========== TEAM MODAL ==========
-    window.openTeamModal = function (tid = null) {
+    window.openTeamModal = async function (tid = null) {
       const team = tid ? TEAMS.find(t => t.id === tid) : null;
       const isEdit = !!team;
       const colorOpts = COLOR_OPTIONS.map(c => `<option value="${c.key}" ${team && team.bg === c.bg ? 'selected' : ''}>${c.label}</option>`).join('');
@@ -1089,11 +1271,21 @@
         const ck = COLOR_OPTIONS.find(c => c.bg === team.bg);
         if (ck) document.getElementById('team-color').value = ck.key;
       }
+      document.getElementById('team-slack-url').value = team?.slackWebhookUrl || '';
+      try {
+        const users = await loadUsers();
+        teamLeaderUsers = users.filter(u => u.isActive !== false);
+        teamLeaderIds = [...(team?.leaderIds || (team?.leaderId ? [team.leaderId] : []))];
+        renderLeaderChips();
+        const searchEl = document.getElementById('team-leader-search');
+        if (searchEl) searchEl.value = '';
+        document.getElementById('team-leader-dropdown')?.classList.add('hidden');
+      } catch {}
       showModal('team-modal');
     };
 
-    window.confirmDeleteTeam = function (tid, name) {
-      if (!confirm(`⚠️ 활동단 [${name}]를 삭제하시겠습니까?`)) return;
+    window.confirmDeleteTeam = async function (tid, name) {
+      if (!await showConfirm(`활동단 [${name}]를 삭제합니다.\n삭제 후 복구할 수 없습니다.`, { title: '활동단 삭제', okText: '삭제', danger: true })) return;
       deleteTeam(tid, name).then(() => { showToast('활동단이 삭제되었습니다.', 'success'); renderTeams(); }).catch(e => showToast(e.message, 'error'));
     };
 
@@ -1108,6 +1300,101 @@
       window.confirmDeleteTeam(tid, name);
     };
 
+    // ========== RENDER: CONTRIBUTORS ==========
+    function compressImageToBase64(file, maxSize = 400, quality = 0.8) {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        const objectUrl = URL.createObjectURL(file);
+        img.onload = () => {
+          URL.revokeObjectURL(objectUrl);
+          const scale = Math.min(maxSize / img.width, maxSize / img.height, 1);
+          const w = Math.round(img.width * scale);
+          const h = Math.round(img.height * scale);
+          const canvas = document.createElement('canvas');
+          canvas.width = w;
+          canvas.height = h;
+          canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+          resolve(canvas.toDataURL('image/jpeg', quality));
+        };
+        img.onerror = reject;
+        img.src = objectUrl;
+      });
+    }
+
+    async function renderContributors() {
+      const panel = document.getElementById('panel-contributors');
+      if (!panel) return;
+      const canEdit = isSuperAdmin();
+      panel.innerHTML = `<div class="text-center py-16 text-slate-400"><div class="w-8 h-8 border-4 border-slate-200 border-t-teal-500 rounded-full animate-spin mx-auto mb-4"></div>로딩 중...</div>`;
+
+      const snap = await getDocs(query(collection(db, 'contributors'), orderBy('order', 'asc')));
+      const contributors = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+      panel.innerHTML = `
+        <div class="mb-6 flex items-center justify-between">
+          <h2 class="text-lg font-bold text-slate-800">기여자</h2>
+          ${canEdit ? `<button id="add-contrib-btn" class="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white text-sm font-bold rounded-xl transition-colors flex items-center gap-1.5"><i data-lucide="plus" class="w-4 h-4"></i> 추가</button>` : ''}
+        </div>
+        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6 gap-6">
+          ${contributors.map(c => `
+            <div class="flex flex-col items-center gap-2 group">
+              <div class="relative">
+                <img src="${esc(c.photoUrl || '')}" alt="${esc(c.name)}" onerror="this.src='https://ui-avatars.com/api/?name=${encodeURIComponent(c.name)}&background=0d9488&color=fff&size=128'" class="w-20 h-20 rounded-full object-cover border-4 border-white shadow-lg">
+                ${canEdit ? `<div class="absolute inset-0 rounded-full bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1">
+                  <button onclick="editContributor('${esc(c.id)}')" class="p-1 bg-white rounded-full text-slate-700 hover:text-teal-600"><i data-lucide="pencil" class="w-3 h-3"></i></button>
+                  <button onclick="deleteContributor('${esc(c.id)}', '${esc(c.name)}')" class="p-1 bg-white rounded-full text-red-500 hover:text-red-700"><i data-lucide="trash-2" class="w-3 h-3"></i></button>
+                </div>` : ''}
+              </div>
+              <div class="text-center">
+                <div class="text-sm font-bold text-slate-800">${esc(c.name)}</div>
+                ${c.role ? `<div class="text-xs text-slate-500">${esc(c.role)}</div>` : ''}
+              </div>
+            </div>
+          `).join('')}
+          ${contributors.length === 0 ? `<div class="col-span-full text-center py-16 text-slate-400 text-sm">등록된 기여자가 없습니다.</div>` : ''}
+        </div>
+      `;
+
+      if (canEdit) {
+        document.getElementById('add-contrib-btn')?.addEventListener('click', () => openContributorModal());
+      }
+      lucide.createIcons();
+    }
+
+    async function openContributorModal(id = null) {
+      let data = null;
+      if (id) {
+        const snap = await getDoc(doc(db, 'contributors', id));
+        if (snap.exists()) data = { id: snap.id, ...snap.data() };
+      }
+      document.getElementById('contrib-modal-title').textContent = data ? '기여자 수정' : '기여자 추가';
+      document.getElementById('contrib-id-field').value = data?.id || '';
+      document.getElementById('contrib-name').value = data?.name || '';
+      document.getElementById('contrib-role').value = data?.role || '';
+      document.getElementById('contrib-photo').value = data?.photoUrl || '';
+      document.getElementById('contrib-order').value = data?.order ?? 99;
+      const fileInput = document.getElementById('contrib-photo-file');
+      if (fileInput) fileInput.value = '';
+      const statusEl = document.getElementById('contrib-upload-status');
+      if (statusEl) { statusEl.textContent = '이미지 파일 선택 (용량 무관, 자동 압축)'; statusEl.className = 'text-[10px] text-slate-400 mt-1'; }
+      const preview = document.getElementById('contrib-photo-preview');
+      if (preview) {
+        if (data?.photoUrl) { preview.src = data.photoUrl; preview.classList.remove('hidden'); }
+        else { preview.src = ''; preview.classList.add('hidden'); }
+      }
+      showModal('contributor-modal');
+      lucide.createIcons();
+    }
+
+    window.editContributor = async function(id) { openContributorModal(id); };
+
+    window.deleteContributor = async function(id, name) {
+      if (!await showConfirm(`기여자 [${name}]를 삭제하시겠습니까?`, { title: '기여자 삭제', okText: '삭제', danger: true })) return;
+      await deleteDoc(doc(db, 'contributors', id));
+      showToast('기여자가 삭제되었습니다.', 'success');
+      renderContributors();
+    };
+
     // ========== INIT ==========
     async function initApp() {
       fetchIP();
@@ -1119,6 +1406,18 @@
 
       // Logout
       document.getElementById('logout-btn')?.addEventListener('click', doLogout);
+
+      function authErrMsg(err) {
+        const map = {
+          'auth/invalid-credential': '아이디 또는 비밀번호가 올바르지 않습니다.',
+          'auth/wrong-password': '아이디 또는 비밀번호가 올바르지 않습니다.',
+          'auth/user-not-found': '아이디 또는 비밀번호가 올바르지 않습니다.',
+          'auth/too-many-requests': '로그인 시도가 너무 많아 일시적으로 잠겼습니다. 잠시 후 다시 시도해주세요.',
+          'auth/network-request-failed': '네트워크 오류가 발생했습니다. 인터넷 연결을 확인해주세요.',
+          'auth/user-disabled': '비활성화된 계정입니다. 관리자에게 문의하세요.',
+        };
+        return map[err.code] || err.message;
+      }
 
       // Login form
       document.getElementById('login-form')?.addEventListener('submit', async e => {
@@ -1132,7 +1431,7 @@
         try {
           const user = await loginUser(un, pw);
           showToast(`환영합니다, ${user.displayName}님!`, 'success');
-        } catch (err) { errEl.textContent = err.message; errEl.classList.remove('hidden'); }
+        } catch (err) { errEl.textContent = authErrMsg(err); errEl.classList.remove('hidden'); }
         finally { btn.disabled = false; btn.textContent = '로그인'; }
       });
 
@@ -1161,14 +1460,13 @@
             if (userDocSnap.exists() && userDocSnap.data().isActive) {
               const userData = userDocSnap.data();
               if (userData.role !== 'admin' && userData.role !== 'superadmin') {
-                showToast('관리자 권한이 없습니다.', 'error');
-                await signOut(auth);
+                // signOut을 호출하지 않음: 같은 브라우저 다른 탭(index.html)의 일반 유저 세션에 영향을 주지 않기 위해
                 currentUser = null;
                 updateHeader();
                 showModal('login-modal');
                 return;
               }
-              
+
               currentUser = {
                 id: user.uid,
                 username: userData.username,
@@ -1176,20 +1474,18 @@
                 role: userData.role,
                 allowedTeams: userData.allowedTeams || []
               };
-              
+
               hideModal('login-modal');
               await loadTeams();
               updateHeader();
               setActiveTab('dashboard');
             } else {
-              await signOut(auth);
               currentUser = null;
               updateHeader();
               showModal('login-modal');
             }
           } catch (e) {
             console.error('인증 정보 로드 에러:', e);
-            await signOut(auth);
             currentUser = null;
             updateHeader();
             showModal('login-modal');
@@ -1215,13 +1511,21 @@
           const role = document.getElementById('user-role').value;
           const isActive = document.getElementById('user-is-active').checked;
           const allowedTeams = Array.from(document.querySelectorAll('[name=allowedTeams]:checked')).map(c => c.value);
-          if (!displayName || ((!isEdit) && !password)) throw new Error('필수 항목을 모두 입력해주세요.');
+          if (!displayName || (!isEdit && !password)) throw new Error('필수 항목을 모두 입력해주세요.');
+          if (isEdit && password && password.length < 6) throw new Error('비밀번호는 6자 이상이어야 합니다.');
+          let photoUrl = undefined;
+          const photoFile = document.getElementById('user-photo-file')?.files?.[0];
+          if (photoFile) {
+            const statusEl = document.getElementById('user-photo-status');
+            if (statusEl) statusEl.textContent = '이미지 압축 중...';
+            photoUrl = await compressImageToBase64(photoFile);
+          }
           if (isEdit) {
             const users = await loadUsers(); const old = users.find(u => u.id === uid);
-            await updateUser(uid, { displayName, password, role, allowedTeams, isActive }, old);
-            showToast('사용자가 수정되었습니다.', 'success');
+            await updateUser(uid, { displayName, newPassword: password, role, allowedTeams, isActive, photoUrl }, old);
+            showToast(`사용자가 수정되었습니다.${password ? ' (비밀번호 변경은 다음 로그인 시 적용)' : ''}`, 'success');
           } else {
-            await createUser({ username, displayName, password, role, allowedTeams, isActive });
+            await createUser({ username, displayName, password, role, allowedTeams, isActive, photoUrl });
             showToast('사용자가 추가되었습니다.', 'success');
           }
           hideModal('user-modal'); await renderUsers();
@@ -1233,6 +1537,52 @@
       document.getElementById('user-role')?.addEventListener('change', e => {
         const tc = document.getElementById('user-teams-section');
         if (tc) tc.classList.toggle('hidden', e.target.value !== 'user');
+      });
+
+      // User photo preview
+      document.getElementById('user-photo-file')?.addEventListener('change', async e => {
+        const file = e.target.files?.[0]; if (!file) return;
+        const statusEl = document.getElementById('user-photo-status');
+        const previewEl = document.getElementById('user-photo-preview');
+        if (statusEl) statusEl.textContent = '압축 중...';
+        try {
+          const dataUrl = await compressImageToBase64(file);
+          if (previewEl) previewEl.innerHTML = `<img src="${dataUrl}" class="w-full h-full object-cover">`;
+          if (statusEl) statusEl.textContent = '준비됨';
+        } catch { if (statusEl) statusEl.textContent = '오류 발생'; }
+      });
+
+      // Team leader search
+      document.getElementById('team-leader-search')?.addEventListener('input', e => {
+        const q = e.target.value.trim().toLowerCase();
+        const dropdown = document.getElementById('team-leader-dropdown');
+        if (!q) { dropdown.classList.add('hidden'); return; }
+        const filtered = teamLeaderUsers.filter(u =>
+          !teamLeaderIds.includes(u.id) &&
+          ((u.displayName || '').toLowerCase().includes(q) || (u.username || '').toLowerCase().includes(q))
+        );
+        dropdown.innerHTML = filtered.length
+          ? filtered.map(u => `<button type="button" data-uid="${esc(u.id)}" class="w-full text-left px-3 py-2 text-sm hover:bg-indigo-50 flex items-center gap-2 transition-colors">
+              <span class="font-medium text-slate-700">${esc(u.displayName || u.username)}</span>
+              <span class="text-xs text-slate-400">@${esc(u.username)}</span>
+            </button>`).join('')
+          : '<p class="text-xs text-slate-400 p-3 text-center">검색 결과 없음</p>';
+        dropdown.classList.remove('hidden');
+      });
+
+      document.getElementById('team-leader-dropdown')?.addEventListener('click', e => {
+        const btn = e.target.closest('[data-uid]');
+        if (!btn) return;
+        const uid = btn.getAttribute('data-uid');
+        if (!teamLeaderIds.includes(uid)) { teamLeaderIds.push(uid); renderLeaderChips(); }
+        document.getElementById('team-leader-search').value = '';
+        document.getElementById('team-leader-dropdown').classList.add('hidden');
+      });
+
+      document.addEventListener('click', e => {
+        if (!e.target.closest('#team-leader-search') && !e.target.closest('#team-leader-dropdown')) {
+          document.getElementById('team-leader-dropdown')?.classList.add('hidden');
+        }
       });
 
       // Team modal form
@@ -1251,8 +1601,10 @@
           const typicalRooms = document.getElementById('team-rooms').value.split(',').map(s => s.trim()).filter(Boolean);
           const colorKey = document.getElementById('team-color').value;
           const col = COLOR_OPTIONS.find(c => c.key === colorKey) || COLOR_OPTIONS[0];
+          const leaderIds = [...teamLeaderIds];
+          const slackWebhookUrl = document.getElementById('team-slack-url')?.value.trim() || '';
           if (!id || !name) throw new Error('ID와 이름은 필수입니다.');
-          const data = { id, name, shortName, fullType, schedule, typicalRooms, bg: col.bg, text: col.text, border: col.border };
+          const data = { id, name, shortName, fullType, schedule, typicalRooms, bg: col.bg, text: col.text, border: col.border, leaderIds, slackWebhookUrl };
           if (isEdit) { const old = TEAMS.find(t => t.id === tid); await updateTeam(tid, data, old); showToast('활동단이 수정되었습니다.', 'success'); }
           else { await createTeam(data); showToast('활동단이 추가되었습니다.', 'success'); }
           hideModal('team-modal'); renderTeams();
@@ -1263,6 +1615,58 @@
       // Close modals
       document.getElementById('close-user-modal')?.addEventListener('click', () => hideModal('user-modal'));
       document.getElementById('close-team-modal')?.addEventListener('click', () => hideModal('team-modal'));
+      document.getElementById('close-contrib-modal')?.addEventListener('click', () => hideModal('contributor-modal'));
+      document.getElementById('contributor-modal')?.addEventListener('click', e => { if (e.target === document.getElementById('contributor-modal')) hideModal('contributor-modal'); });
+
+      // Contributor form submit
+      document.getElementById('contrib-form')?.addEventListener('submit', async e => {
+        e.preventDefault();
+        const btn = e.target.querySelector('[type=submit]');
+        btn.disabled = true; btn.textContent = '저장 중...';
+        try {
+          const id = document.getElementById('contrib-id-field').value;
+          const name = document.getElementById('contrib-name').value.trim();
+          const role = document.getElementById('contrib-role').value.trim();
+          let photoUrl = document.getElementById('contrib-photo').value.trim();
+          const order = parseInt(document.getElementById('contrib-order').value) || 99;
+          if (!name) throw new Error('이름을 입력하세요.');
+
+          const fileInput = document.getElementById('contrib-photo-file');
+          if (fileInput?.files[0]) {
+            const statusEl = document.getElementById('contrib-upload-status');
+            if (statusEl) { statusEl.textContent = '압축 중...'; statusEl.className = 'text-[10px] text-teal-600 mt-1'; }
+            try {
+              photoUrl = await compressImageToBase64(fileInput.files[0]);
+              if (statusEl) { statusEl.textContent = '변환 완료 ✓'; statusEl.className = 'text-[10px] text-teal-600 mt-1'; }
+            } catch (err) {
+              if (statusEl) { statusEl.textContent = '이미지 처리 실패'; statusEl.className = 'text-[10px] text-red-500 mt-1'; }
+              if (!photoUrl) throw new Error('이미지 처리에 실패했습니다.');
+            }
+          }
+
+          const data = { name, role, photoUrl, order };
+          if (id) {
+            await setDoc(doc(db, 'contributors', id), { ...data, updatedAt: serverTimestamp() }, { merge: true });
+            showToast('기여자가 수정되었습니다.', 'success');
+          } else {
+            await addDoc(collection(db, 'contributors'), { ...data, createdAt: serverTimestamp() });
+            showToast('기여자가 추가되었습니다.', 'success');
+          }
+          hideModal('contributor-modal');
+          await renderContributors();
+        } catch(err) { showToast(err.message, 'error'); }
+        finally { btn.disabled = false; btn.textContent = '저장'; }
+      });
+
+      // Contributor photo file preview
+      document.getElementById('contrib-photo-file')?.addEventListener('change', e => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const preview = document.getElementById('contrib-photo-preview');
+        if (preview) { preview.src = URL.createObjectURL(file); preview.classList.remove('hidden'); }
+        const statusEl = document.getElementById('contrib-upload-status');
+        if (statusEl) { statusEl.textContent = `선택됨: ${file.name}`; statusEl.className = 'text-[10px] text-teal-600 mt-1'; }
+      });
     }
 
     function updateHeader() {
@@ -1285,6 +1689,8 @@
     function isAdminOrSuperForRole(role) { return role === 'admin' || role === 'superadmin'; }
 
     // Expose functions to window for dynamic HTML inline onclick handlers
+    window.hideModal = hideModal;
+    window.showModal = showModal;
     window.setActiveTab = setActiveTab;
     window.renderLoginLogs = renderLoginLogs;
     window.renderActivityLogs = renderActivityLogs;
@@ -1397,6 +1803,14 @@
           class="w-full text-left flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold text-slate-400 hover:bg-slate-700 hover:text-white transition-all">
           <i data-lucide="file-spreadsheet" class="w-4 h-4 flex-shrink-0"></i> 구글 시트 연동
         </button>
+        <button data-tab="invite-codes"
+          class="w-full text-left flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold text-slate-400 hover:bg-slate-700 hover:text-white transition-all">
+          <i data-lucide="ticket" class="w-4 h-4 flex-shrink-0"></i> 초대코드
+        </button>
+        <button data-tab="contributors"
+          class="w-full text-left flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold text-slate-400 hover:bg-slate-700 hover:text-white transition-all">
+          <i data-lucide="heart" class="w-4 h-4 flex-shrink-0"></i> 기여자 관리
+        </button>
       </nav>
     </aside>
 
@@ -1420,6 +1834,12 @@
       <button data-tab="sheets"
         class="flex-1 flex flex-col items-center gap-1 py-2 text-slate-400 text-[9px] font-bold"><i
           data-lucide="file-spreadsheet" class="w-4 h-4"></i>시트연동</button>
+      <button data-tab="invite-codes"
+        class="flex-1 flex flex-col items-center gap-1 py-2 text-slate-400 text-[9px] font-bold"><i
+          data-lucide="ticket" class="w-4 h-4"></i>초대코드</button>
+      <button data-tab="contributors"
+        class="flex-1 flex flex-col items-center gap-1 py-2 text-slate-400 text-[9px] font-bold"><i
+          data-lucide="heart" class="w-4 h-4"></i>기여자</button>
     </div>
 
     <!-- Main Content -->
@@ -1431,6 +1851,8 @@
       <div data-panel="activity-logs" id="panel-activity-logs" class="hidden"></div>
       <div data-panel="archive" id="panel-archive" class="hidden"></div>
       <div data-panel="sheets" id="panel-sheets" class="hidden"></div>
+      <div data-panel="invite-codes" id="panel-invite-codes" class="hidden"></div>
+      <div data-panel="contributors" id="panel-contributors" class="hidden"></div>
     </main>
   </div>
 
@@ -1541,6 +1963,22 @@
             class="grid grid-cols-2 gap-1 max-h-48 overflow-y-auto p-1 border border-slate-100 rounded-xl bg-slate-50">
           </div>
         </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1.5">프로필 사진</label>
+          <div class="flex items-center gap-3">
+            <div id="user-photo-preview" class="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center overflow-hidden border border-slate-200 shrink-0">
+              <i data-lucide="user" class="w-6 h-6 text-slate-300"></i>
+            </div>
+            <div class="flex-1">
+              <label class="flex items-center gap-2 cursor-pointer px-3 py-2 text-xs text-slate-600 border border-slate-200 rounded-xl hover:bg-slate-50 transition">
+                <i data-lucide="upload" class="w-3.5 h-3.5"></i>
+                <span>이미지 선택 (자동 압축)</span>
+                <input type="file" id="user-photo-file" accept="image/*" class="hidden">
+              </label>
+              <p id="user-photo-status" class="text-[10px] text-slate-400 mt-1"></p>
+            </div>
+          </div>
+        </div>
         <button type="submit"
           class="w-full bg-teal-600 hover:bg-teal-700 text-white font-bold py-2.5 rounded-xl transition-all text-sm shadow-sm">저장</button>
       </form>
@@ -1596,7 +2034,7 @@
         <div>
           <label class="block text-xs font-semibold text-slate-600 mb-1.5">주요 공간 <span
               class="text-slate-400 font-normal">(쉼표 구분)</span></label>
-          <input id="team-rooms" type="text" placeholder="예: 나루지기실, 링키실"
+          <input id="team-rooms" type="text" placeholder="예: 나루지기, 링키"
             class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-400 placeholder-slate-300">
         </div>
         <div>
@@ -1604,12 +2042,90 @@
           <select id="team-color"
             class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white"></select>
         </div>
+        <div class="border-t border-slate-100 pt-3 space-y-3">
+          <p class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">알림 설정</p>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1.5">담당자 <span class="text-slate-400 font-normal">(예약 변경 시 인앱 알림 · 복수 선택 가능)</span></label>
+            <div id="team-leaders-selected" class="flex flex-wrap gap-1 mb-2"></div>
+            <div class="relative">
+              <input id="team-leader-search" type="text" placeholder="이름으로 검색 후 선택..." autocomplete="off"
+                class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-400 placeholder-slate-300">
+              <div id="team-leader-dropdown" class="hidden absolute z-20 w-full mt-1 bg-white border border-slate-200 rounded-xl shadow-lg max-h-40 overflow-y-auto"></div>
+            </div>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1.5">슬랙 웹훅 URL <span class="text-slate-400 font-normal">(선택)</span></label>
+            <input id="team-slack-url" type="url" placeholder="https://hooks.slack.com/services/..."
+              class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-400 placeholder-slate-300">
+          </div>
+        </div>
         <button type="submit"
           class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 rounded-xl transition-all text-sm shadow-sm mt-1">저장</button>
       </form>
     </div>
   </div>
 
+  <!-- CONTRIBUTOR MODAL -->
+  <div id="contributor-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm border border-slate-200 overflow-hidden">
+      <div class="flex items-center justify-between p-5 border-b border-slate-100">
+        <h2 id="contrib-modal-title" class="font-bold text-slate-800">기여자 추가</h2>
+        <button id="close-contrib-modal" class="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100"><i data-lucide="x" class="w-5 h-5"></i></button>
+      </div>
+      <form id="contrib-form" class="p-5 flex flex-col gap-3">
+        <input type="hidden" id="contrib-id-field">
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1.5">이름 *</label>
+          <input id="contrib-name" type="text" required placeholder="홍길동" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1.5">역할 / 소개</label>
+          <input id="contrib-role" type="text" placeholder="예: 웹 개발, 디자인" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1.5">사진 업로드 / URL</label>
+          <div class="flex items-center gap-3 mb-2">
+            <img id="contrib-photo-preview" src="" onerror="this.classList.add('hidden')" class="w-14 h-14 rounded-full object-cover border-2 border-slate-200 hidden shrink-0">
+            <div class="flex-1 min-w-0">
+              <input id="contrib-photo-file" type="file" accept="image/*"
+                class="w-full text-xs text-slate-600 file:mr-2 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-teal-50 file:text-teal-700 hover:file:bg-teal-100 cursor-pointer">
+              <p id="contrib-upload-status" class="text-[10px] text-slate-400 mt-1">이미지 파일 선택 (용량 무관, 자동 압축)</p>
+            </div>
+          </div>
+          <input id="contrib-photo" type="url" placeholder="또는 URL 직접 입력 (https://...)" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400">
+          <p class="text-[10px] text-slate-400 mt-1">파일 업로드 우선 적용 · 비워두면 이니셜 표시</p>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1.5">순서 (숫자, 낮을수록 앞)</label>
+          <input id="contrib-order" type="number" value="99" min="0" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400">
+        </div>
+        <button type="submit" class="w-full bg-teal-600 hover:bg-teal-700 text-white font-bold py-2.5 rounded-xl transition-all text-sm mt-1">저장</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- CONFIRM MODAL -->
+  <div id="confirm-modal" class="hidden fixed inset-0 z-[999] flex items-center justify-center p-4">
+    <div class="absolute inset-0 bg-black/40 backdrop-blur-sm" id="confirm-modal-backdrop"></div>
+    <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-xs border border-slate-100 overflow-hidden">
+      <div id="confirm-modal-header" class="h-1.5 w-full bg-amber-400"></div>
+      <div class="p-6">
+        <div class="flex items-start gap-3 mb-4">
+          <div class="w-10 h-10 rounded-full bg-amber-50 flex items-center justify-center shrink-0">
+            <i data-lucide="alert-triangle" class="w-5 h-5 text-amber-500"></i>
+          </div>
+          <div>
+            <h3 id="confirm-modal-title" class="text-sm font-bold text-slate-800 mb-1">확인</h3>
+            <p id="confirm-modal-msg" class="text-xs text-slate-500 leading-relaxed whitespace-pre-line"></p>
+          </div>
+        </div>
+        <div class="flex gap-2">
+          <button id="confirm-modal-cancel" class="flex-1 py-2.5 rounded-xl text-sm font-bold bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors">취소</button>
+          <button id="confirm-modal-ok" class="flex-1 py-2.5 rounded-xl text-sm font-bold text-white bg-teal-600 hover:bg-teal-700 transition-colors">확인</button>
+        </div>
+      </div>
+    </div>
+  </div>
 </body>
 
 </html>

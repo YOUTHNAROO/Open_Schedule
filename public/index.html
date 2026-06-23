@@ -10,35 +10,81 @@
     <link rel="shortcut icon" href="favicon.ico?v=5" type="image/x-icon">
     <link rel="icon" href="favicon.png?v=5" type="image/png" sizes="512x512">
     <link rel="apple-touch-icon" href="apple-touch-icon.png?v=5">
+    <script src="/env.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+    <script>
+      // OneSignal sync 응답을 SDK보다 먼저 캐시 갱신 — 구 도메인이 캐시된 경우 해소
+      var _osId = window.ENV && window.ENV.ONESIGNAL_APP_ID;
+      if (_osId) fetch('https://api.onesignal.com/sync/' + _osId + '/web?callback=__jp0',
+        { cache: 'reload' }).catch(function(){});
+    </script>
+    <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
+    <script>
+      window.__osPushOk = false;
+      window.OneSignalDeferred = window.OneSignalDeferred || [];
+      OneSignalDeferred.push(async function(OneSignal) {
+        try {
+          await OneSignal.init({
+            appId: (window.ENV && window.ENV.ONESIGNAL_APP_ID) || "",
+            serviceWorkerPath: '/OneSignalSDKWorker.js',
+            allowLocalhostAsSecureOrigin: true,
+            notifyButton: { enable: false },
+            promptOptions: {
+              slidedown: {
+                prompts: [{
+                  type: 'push',
+                  autoPrompt: true,
+                  text: {
+                    actionMessage: '유스나루 예약 알림을 받으시겠습니까? 예약·취소 시 실시간으로 알려드립니다.',
+                    acceptButton: '허용',
+                    cancelButton: '나중에',
+                  }
+                }]
+              }
+            }
+          });
+          window.__osPushOk = true;
+        } catch(e) {
+          // 브라우저 HTTP 캐시에 구 도메인 응답이 남아 있을 때 발생.
+          // 1시간 후 자동 해소되며 그 전까지는 push 기능만 비활성화.
+          console.warn('[OneSignal] Push 비활성화 (도메인 캐시 불일치):', e.message);
+        }
+      });
+    </script>
     <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+        import { initializeApp, deleteApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
         import {
             getFirestore, collection, doc, setDoc, getDoc, getDocs, deleteDoc,
             onSnapshot, query, orderBy, runTransaction, serverTimestamp,
-            writeBatch, where, limit, addDoc
+            writeBatch, where, limit, addDoc, arrayUnion
         } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
         import {
-            getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged
+            getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged,
+            createUserWithEmailAndPassword, EmailAuthProvider,
+            reauthenticateWithCredential, updatePassword
         } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
         // ==================== FIREBASE CONFIG ====================
         const firebaseConfig = {
-            apiKey: "AIzaSyA1XuuCYE2RnipFHQ0d9dCjGNlPtgwvWmw",
-            authDomain: "youthnarooschedule.firebaseapp.com",
-            databaseURL: "https://youthnarooschedule-default-rtdb.firebaseio.com",
-            projectId: "youthnarooschedule",
-            storageBucket: "youthnarooschedule.firebasestorage.app",
-            messagingSenderId: "53441811066",
-            appId: "1:53441811066:web:cc3604e124ca94778ca1c3",
-            measurementId: "G-ME8HDTV2FV"
+            apiKey: window.ENV.FIREBASE_API_KEY,
+            authDomain: window.ENV.FIREBASE_AUTH_DOMAIN,
+            databaseURL: window.ENV.FIREBASE_DATABASE_URL,
+            projectId: window.ENV.FIREBASE_PROJECT_ID,
+            storageBucket: window.ENV.FIREBASE_STORAGE_BUCKET,
+            messagingSenderId: window.ENV.FIREBASE_MESSAGING_SENDER_ID,
+            appId: window.ENV.FIREBASE_APP_ID,
+            measurementId: window.ENV.FIREBASE_MEASUREMENT_ID
         };
 
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
         const auth = getAuth(app);
+
+        // ==================== ONESIGNAL CONFIG ====================
+        const ONESIGNAL_APP_ID = window.ENV.ONESIGNAL_APP_ID;
+        const ONESIGNAL_REST_API_KEY = window.ENV.ONESIGNAL_REST_API_KEY;
 
         // Global error logging for debugging client-side errors
         window.addEventListener('error', (e) => {
@@ -61,25 +107,28 @@
             { id: 'sun', label: '일', fullLabel: '일요일', color: 'bg-red-500' },
         ];
 
-        const HOURS = ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00'];
+        const HOURS = ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00', '21:00'];
 
         const FLOORS = [
-            { id: 'b1', label: '지하 1층', rooms: ['수영장', '소리나루'] },
-            { id: 'f1', label: '1층', rooms: ['나루지기실', '콤마스튜디오', '꿈나루실', '링키실'] },
-            { id: 'f2', label: '2층', rooms: ['방송미디어나루', '스튜디오M', '스튜디오H'] },
-            { id: 'f3', label: '3층', rooms: ['체육관'] }
+            { id: 'f3', label: '3층', rooms: ['체육관'] },
+            { id: 'b1', label: '지하 1층', rooms: ['건강나루', '피아노나루', '소리나루'] },
+            { id: 'f1-program', label: '1층 프로그램실', rooms: ['상상나루', '생각나루', '창의나루', '세미나실', '키움나루', '사랑나루', '나루지기', '멀티미디어'] },
+            { id: 'f1-comma', label: '1층 콤마', rooms: ['콤마', '콤마 스튜디오'] },
+            { id: 'happy-school', label: '행복동행학교', rooms: ['링키', '행복나루', '동행나루'] },
+            { id: 'after-school', label: '방과후아카데미', rooms: ['신나루', '빛나루'] },
+            { id: 'f2-media', label: '2층 방송문화콘텐츠공작소', rooms: ['미디어나루', '방송나루', '스튜디오M', '스튜디오H'] }
         ];
         const ALL_ROOMS = FLOORS.flatMap(f => f.rooms);
 
         const DEFAULT_TEAMS = [
-            { id: 'narujigi', name: '나루지기', fullType: '청소년운영위원회', schedule: '2,4,5주 토요일 14:00~17:00', typicalRooms: ['나루지기실'], bg: 'bg-amber-100', text: 'text-amber-800', border: 'border-amber-300' },
-            { id: 'dahim', name: '다힘', fullType: '공연동아리연합회', schedule: '보통 평일 저녁, 주말 종일', typicalRooms: ['콤마스튜디오', '소리나루', '스튜디오M'], bg: 'bg-sky-100', text: 'text-sky-800', border: 'border-sky-300' },
-            { id: 'story', name: '진로스토리텔러', fullType: '전문가 연합 활동단', schedule: '2,4주 토요일 14:00~17:00', typicalRooms: ['링키실', '꿈나루실', '스튜디오M'], bg: 'bg-emerald-100', text: 'text-emerald-800', border: 'border-emerald-300' },
-            { id: 'ynbc-univ', name: '대학생미디어', fullType: 'YNBC 대학생미디어활동단', schedule: '매주 금요일 14:00~17:00', typicalRooms: ['방송미디어나루', '스튜디오M', '스튜디오H'], bg: 'bg-indigo-100', text: 'text-indigo-800', border: 'border-indigo-300' },
-            { id: 'mascot', name: '마스코트', fullType: '마포구청소년축제기획단', schedule: '2,4주 토요일 14:00~17:00', typicalRooms: ['꿈나루실'], bg: 'bg-blue-100', text: 'text-blue-800', border: 'border-blue-300' },
-            { id: 'mulyuol', name: '물여울', fullType: '수영동아리', schedule: '매주 토요일 09:00~11:00', typicalRooms: ['수영장'], bg: 'bg-cyan-100', text: 'text-cyan-800', border: 'border-cyan-300' },
+            { id: 'narujigi', name: '나루지기', fullType: '청소년운영위원회', schedule: '2,4,5주 토요일 14:00~17:00', typicalRooms: ['나루지기'], bg: 'bg-amber-100', text: 'text-amber-800', border: 'border-amber-300' },
+            { id: 'dahim', name: '다힘', fullType: '공연동아리연합회', schedule: '보통 평일 저녁, 주말 종일', typicalRooms: ['콤마 스튜디오', '소리나루', '스튜디오M'], bg: 'bg-sky-100', text: 'text-sky-800', border: 'border-sky-300' },
+            { id: 'story', name: '진로스토리텔러', fullType: '전문가 연합 활동단', schedule: '2,4주 토요일 14:00~17:00', typicalRooms: ['링키', '상상나루', '스튜디오M'], bg: 'bg-emerald-100', text: 'text-emerald-800', border: 'border-emerald-300' },
+            { id: 'ynbc-univ', name: '대학생미디어', fullType: 'YNBC 대학생미디어활동단', schedule: '매주 금요일 14:00~17:00', typicalRooms: ['방송나루', '스튜디오M', '스튜디오H'], bg: 'bg-indigo-100', text: 'text-indigo-800', border: 'border-indigo-300' },
+            { id: 'mascot', name: '마스코트', fullType: '마포구청소년축제기획단', schedule: '2,4주 토요일 14:00~17:00', typicalRooms: ['상상나루'], bg: 'bg-blue-100', text: 'text-blue-800', border: 'border-blue-300' },
+            { id: 'mulyuol', name: '물여울', fullType: '수영동아리', schedule: '매주 토요일 09:00~11:00', typicalRooms: ['건강나루'], bg: 'bg-cyan-100', text: 'text-cyan-800', border: 'border-cyan-300' },
             { id: 'halftime', name: '하프타임', fullType: '농구동아리', schedule: '매주 토요일 15:00~17:00', typicalRooms: ['체육관'], bg: 'bg-orange-100', text: 'text-orange-800', border: 'border-orange-300' },
-            { id: 'ynbc', name: '청소년방송국', fullType: 'YNBC 유스나루청소년방송국', schedule: '1,3주 토요일 14:00~17:00', typicalRooms: ['방송미디어나루', '스튜디오M', '스튜디오H'], bg: 'bg-purple-100', text: 'text-purple-800', border: 'border-purple-300' },
+            { id: 'ynbc', name: '청소년방송국', fullType: 'YNBC 유스나루청소년방송국', schedule: '1,3주 토요일 14:00~17:00', typicalRooms: ['방송나루', '스튜디오M', '스튜디오H'], bg: 'bg-purple-100', text: 'text-purple-800', border: 'border-purple-300' },
         ];
 
         // ==================== STATE ====================
@@ -97,6 +146,15 @@
         let clientIP = '알 수 없음';
         let activityLogs = [];
         let logFilter = 'all'; // 'all' | 'my-res' | 'my-cancel'
+        let selectedReservationContext = null;
+        let USERS_CACHE = []; // 태그용 사용자 캐시 { id, username, displayName }
+        let unsubPresence = null;
+        let presenceInterval = null;
+        let onlineCount = 0;
+        let unsubNotifications = null;
+        let unreadNotifCount = 0;
+        let roomBlocks = []; // { id, room, day, startHour, endHour, allowedTeamId, note }
+        let unsubRoomBlocks = null;
 
         // ==================== UTILS ====================
         function getWeekId(date) {
@@ -118,6 +176,378 @@
 
         function esc(s) {
             return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
+        function isValidHexColor(color) {
+            return /^#[0-9a-f]{6}$/i.test(String(color || '').trim());
+        }
+
+        function normalizeColor(color) {
+            const c = String(color || '').trim();
+            return isValidHexColor(c) ? c.toLowerCase() : '';
+        }
+
+        function getTextColorForBg(hex) {
+            const c = normalizeColor(hex);
+            if (!c) return '#334155';
+            const r = parseInt(c.slice(1, 3), 16);
+            const g = parseInt(c.slice(3, 5), 16);
+            const b = parseInt(c.slice(5, 7), 16);
+            return ((r * 299 + g * 587 + b * 114) / 1000) > 150 ? '#1e293b' : '#ffffff';
+        }
+
+        // ==================== CRYPTO (비밀번호 암호화) ====================
+        async function hashStr(str) {
+            const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+            return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+        }
+        async function hashAnswer(answer) {
+            return hashStr(answer.toLowerCase().trim() + '|youthnaroo-answer');
+        }
+        async function deriveKey(answer) {
+            const raw = await crypto.subtle.importKey('raw', new TextEncoder().encode(answer.toLowerCase().trim()), 'PBKDF2', false, ['deriveKey']);
+            return crypto.subtle.deriveKey({ name:'PBKDF2', salt: new TextEncoder().encode('youthnaroo-pwsalt'), iterations: 100000, hash:'SHA-256' }, raw, { name:'AES-GCM', length:256 }, false, ['encrypt','decrypt']);
+        }
+        async function encryptPassword(password, answer) {
+            const key = await deriveKey(answer);
+            const iv = crypto.getRandomValues(new Uint8Array(12));
+            const ct = await crypto.subtle.encrypt({ name:'AES-GCM', iv }, key, new TextEncoder().encode(password));
+            const combined = new Uint8Array(12 + ct.byteLength);
+            combined.set(iv); combined.set(new Uint8Array(ct), 12);
+            return btoa(String.fromCharCode(...combined));
+        }
+        async function decryptPassword(enc, answer) {
+            const key = await deriveKey(answer);
+            const bytes = Uint8Array.from(atob(enc), c => c.charCodeAt(0));
+            const iv = bytes.slice(0,12), ct = bytes.slice(12);
+            const plain = await crypto.subtle.decrypt({ name:'AES-GCM', iv }, key, ct);
+            return new TextDecoder().decode(plain);
+        }
+
+        // ==================== 회원가입 ====================
+        const SECURITY_QUESTIONS = [
+            '나의 첫 번째 학교 이름은?',
+            '어머니의 성함은?',
+            '내가 자란 도시(동네) 이름은?',
+            '가장 친한 친구의 이름은?',
+            '첫 번째 반려동물의 이름은?',
+            '내가 졸업한 초등학교 이름은?',
+            '좋아하는 선생님의 성함은?',
+        ];
+
+        async function handleRegister(e) {
+            e.preventDefault();
+            const username   = document.getElementById('reg-username')?.value.trim().toLowerCase();
+            const dispName   = document.getElementById('reg-dispname')?.value.trim();
+            const password   = document.getElementById('reg-password')?.value;
+            const password2  = document.getElementById('reg-password2')?.value;
+            const inviteCode = document.getElementById('reg-invite')?.value.trim().toUpperCase();
+            const secQ       = document.getElementById('reg-sec-q')?.value;
+            const secA       = document.getElementById('reg-sec-a')?.value.trim();
+            const errEl      = document.getElementById('reg-error');
+            const showErr    = msg => { if(errEl){ errEl.textContent = msg; errEl.classList.remove('hidden'); } };
+            errEl?.classList.add('hidden');
+
+            if (!username || !dispName || !password || !inviteCode || !secQ || !secA) return showErr('모든 항목을 입력하세요.');
+            if (!/^[a-z0-9_]{2,20}$/.test(username)) return showErr('아이디는 영소문자·숫자·_만 2~20자로 입력하세요.');
+            if (password.length < 6) return showErr('비밀번호는 6자 이상이어야 합니다.');
+            if (password !== password2) return showErr('비밀번호가 일치하지 않습니다.');
+            if (secA.length < 2) return showErr('보안 답변을 입력하세요.');
+
+            const btn = document.getElementById('reg-submit-btn');
+            btn.disabled = true; btn.textContent = '처리 중...';
+            let secApp;
+            try {
+                secApp = initializeApp(app.options, 'reg_' + Date.now());
+                const secAuth = getAuth(secApp);
+                const secDb   = getFirestore(secApp);
+                // 초대코드 검증 (public read — firestore rules 허용)
+                const codeDoc = await getDoc(doc(db, 'invite_codes', inviteCode));
+                if (!codeDoc.exists()) { showErr('유효하지 않은 초대코드입니다.'); return; }
+                const codeData = codeDoc.data();
+                if (codeData.isUsed) { showErr('이미 사용된 초대코드입니다.'); return; }
+                if (codeData.expiresAt && codeData.expiresAt.toDate() < new Date()) { showErr('만료된 초대코드입니다.'); return; }
+                if (codeData.targetUsername && codeData.targetUsername !== username) { showErr('이 초대코드는 지정된 사용자만 사용할 수 있습니다.'); return; }
+
+                // Firebase Auth 계정 생성 (secondaryApp → main auth 미간섭)
+                const email = `${username}@youthnaroo.local`;
+                const uc = await createUserWithEmailAndPassword(secAuth, email, password);
+                const uid = uc.user.uid;
+
+                // Firestore 문서 생성 (secDb — 새 유저 인증 컨텍스트)
+                const answerHash = await hashAnswer(secA);
+                const encPw      = await encryptPassword(password, secA);
+                await setDoc(doc(secDb, 'users', uid), {
+                    username, displayName: dispName,
+                    role: codeData.role || 'user',
+                    allowedTeams: codeData.allowedTeams || [],
+                    isActive: true, createdAt: serverTimestamp(), createdBy: 'self-register'
+                });
+                await setDoc(doc(secDb, 'user_recovery', username), {
+                    uid, email, securityQuestion: secQ,
+                    securityAnswerHash: answerHash, encryptedPassword: encPw
+                });
+                await setDoc(doc(secDb, 'invite_codes', inviteCode),
+                    { isUsed: true, usedBy: username, usedAt: serverTimestamp() }, { merge: true });
+
+                await signOut(secAuth);
+                showToast('회원가입이 완료되었습니다. 로그인해주세요.', 'success');
+                switchLoginTab('login');
+                document.getElementById('login-username').value = username;
+            } catch(err) {
+                showErr(err.code === 'auth/email-already-in-use' ? '이미 사용 중인 아이디입니다.' : (err.message || '오류가 발생했습니다.'));
+            } finally {
+                try { await deleteApp(secApp); } catch {}
+                btn.disabled = false; btn.textContent = '회원가입';
+            }
+        }
+
+        // ==================== 비밀번호 찾기 ====================
+        let _recoveryData = null;
+
+        async function handleRecovery1(e) {
+            e.preventDefault();
+            const username = document.getElementById('rec-username')?.value.trim().toLowerCase();
+            const errEl = document.getElementById('rec-error');
+            errEl?.classList.add('hidden');
+            if (!username) return;
+            const btn = document.getElementById('rec-step1-btn');
+            btn.disabled = true;
+            try {
+                const snap = await getDoc(doc(db, 'user_recovery', username));
+                if (!snap.exists()) { errEl.textContent = '등록되지 않은 아이디입니다.'; errEl.classList.remove('hidden'); return; }
+                _recoveryData = { username, ...snap.data() };
+                document.getElementById('rec-question-text').textContent = _recoveryData.securityQuestion;
+                document.getElementById('rec-step1').classList.add('hidden');
+                document.getElementById('rec-step2').classList.remove('hidden');
+            } catch(err) { errEl.textContent = '오류: ' + err.message; errEl.classList.remove('hidden'); }
+            finally { btn.disabled = false; }
+        }
+
+        async function handleRecovery2(e) {
+            e.preventDefault();
+            const answer = document.getElementById('rec-answer')?.value.trim();
+            const errEl = document.getElementById('rec-error');
+            errEl?.classList.add('hidden');
+            if (!answer || !_recoveryData) return;
+            const btn = document.getElementById('rec-step2-btn');
+            btn.disabled = true;
+            try {
+                const hash = await hashAnswer(answer);
+                if (hash !== _recoveryData.securityAnswerHash) { errEl.textContent = '보안 답변이 올바르지 않습니다.'; errEl.classList.remove('hidden'); return; }
+                _recoveryData._answer = answer;
+                document.getElementById('rec-step2').classList.add('hidden');
+                document.getElementById('rec-step3').classList.remove('hidden');
+            } catch(err) {
+                errEl.textContent = '오류가 발생했습니다: ' + (err.message || err);
+                errEl.classList.remove('hidden');
+            } finally { btn.disabled = false; }
+        }
+
+        async function handleRecovery3(e) {
+            e.preventDefault();
+            const newPw  = document.getElementById('rec-newpw')?.value;
+            const newPw2 = document.getElementById('rec-newpw2')?.value;
+            const errEl  = document.getElementById('rec-error');
+            errEl?.classList.add('hidden');
+            if (newPw.length < 6) { errEl.textContent = '비밀번호는 6자 이상이어야 합니다.'; errEl.classList.remove('hidden'); return; }
+            if (newPw !== newPw2) { errEl.textContent = '비밀번호가 일치하지 않습니다.'; errEl.classList.remove('hidden'); return; }
+            const btn = document.getElementById('rec-step3-btn');
+            btn.disabled = true;
+            const recApp = initializeApp(app.options, 'rec_' + Date.now());
+            const recAuth = getAuth(recApp);
+            const recDb   = getFirestore(recApp);
+            try {
+                // 기존 암호화 비밀번호 복호화
+                const oldPw = await decryptPassword(_recoveryData.encryptedPassword, _recoveryData._answer);
+                // secondaryApp으로 로그인 → main auth/onAuthStateChanged 미간섭
+                const uc = await signInWithEmailAndPassword(recAuth, _recoveryData.email, oldPw);
+                await updatePassword(uc.user, newPw);
+                // 복구 문서 재암호화 (secDb로 인증 컨텍스트 유지)
+                const encPw = await encryptPassword(newPw, _recoveryData._answer);
+                await setDoc(doc(recDb, 'user_recovery', _recoveryData.username),
+                    { encryptedPassword: encPw }, { merge: true });
+                await signOut(recAuth);
+                _recoveryData = null;
+                showToast('비밀번호가 변경되었습니다. 다시 로그인하세요.', 'success');
+                switchLoginTab('login');
+            } catch(err) {
+                errEl.textContent = '변경 실패: 보안 답변을 다시 확인하거나 관리자에게 문의하세요.';
+                errEl.classList.remove('hidden');
+                console.error(err);
+            } finally {
+                try { await deleteApp(recApp); } catch {}
+                btn.disabled = false;
+            }
+        }
+
+        // ==================== 비밀번호 변경 (로그인 중) ====================
+        async function handlePasswordChange(e) {
+            e.preventDefault();
+            const curPw  = document.getElementById('chpw-current')?.value;
+            const newPw  = document.getElementById('chpw-new')?.value;
+            const newPw2 = document.getElementById('chpw-new2')?.value;
+            const secA   = document.getElementById('chpw-sec-a')?.value.trim();
+            const errEl  = document.getElementById('chpw-error');
+            errEl?.classList.add('hidden');
+            if (!curPw || !newPw || !newPw2) return;
+            if (newPw.length < 6) { errEl.textContent = '새 비밀번호는 6자 이상이어야 합니다.'; errEl.classList.remove('hidden'); return; }
+            if (newPw !== newPw2) { errEl.textContent = '비밀번호가 일치하지 않습니다.'; errEl.classList.remove('hidden'); return; }
+            const btn = document.getElementById('chpw-submit');
+            btn.disabled = true;
+            try {
+                if (!secA) {
+                    const recCheck = await getDoc(doc(db, 'user_recovery', currentUser.username));
+                    if (recCheck.exists()) showToast('보안 답변을 입력하지 않으면 비밀번호 찾기 기능이 비활성화됩니다.', 'error');
+                }
+                const user = auth.currentUser;
+                const email = `${currentUser.username}@youthnaroo.local`;
+                const cred = EmailAuthProvider.credential(email, curPw);
+                await reauthenticateWithCredential(user, cred);
+                await updatePassword(user, newPw);
+                // user_recovery 재암호화 (보안 답변 제공 시)
+                if (secA) {
+                    const recSnap = await getDoc(doc(db, 'user_recovery', currentUser.username));
+                    if (recSnap.exists()) {
+                        const hash = await hashAnswer(secA);
+                        if (hash === recSnap.data().securityAnswerHash) {
+                            const encPw = await encryptPassword(newPw, secA);
+                            await setDoc(doc(db, 'user_recovery', currentUser.username), { encryptedPassword: encPw }, { merge: true });
+                        } else { showToast('보안 답변 불일치 — 비밀번호 찾기 기능은 비활성화됩니다.', 'error'); }
+                    }
+                }
+                hideModal('change-pw-modal');
+                showToast('비밀번호가 변경되었습니다.', 'success');
+                document.getElementById('chpw-form')?.reset();
+            } catch(err) {
+                const map = { 'auth/invalid-credential':'현재 비밀번호가 올바르지 않습니다.', 'auth/wrong-password':'현재 비밀번호가 올바르지 않습니다.' };
+                errEl.textContent = map[err.code] || err.message;
+                errEl.classList.remove('hidden');
+            } finally { btn.disabled = false; }
+        }
+
+        function switchLoginTab(tab) {
+            const activeClasses = ['text-teal-600','border-b-2','border-teal-500','bg-teal-50'];
+            ['login','register','recover'].forEach(t => {
+                const btn = document.getElementById(`ltab-${t}`);
+                if (btn) {
+                    if (t === tab) { btn.classList.add(...activeClasses); btn.classList.remove('text-slate-400'); }
+                    else { btn.classList.remove(...activeClasses); btn.classList.add('text-slate-400'); }
+                }
+                document.getElementById(`lform-${t}`)?.classList.toggle('hidden', t !== tab);
+            });
+            document.getElementById('rec-step1')?.classList.remove('hidden');
+            document.getElementById('rec-step2')?.classList.add('hidden');
+            document.getElementById('rec-step3')?.classList.add('hidden');
+            document.getElementById('rec-error')?.classList.add('hidden');
+            document.getElementById('login-error')?.classList.add('hidden');
+            document.getElementById('reg-error')?.classList.add('hidden');
+        }
+
+        function formatTime(isoStr) {
+            if (!isoStr) return '';
+            const d = new Date(isoStr), now = new Date(), diff = now - d;
+            if (diff < 60000) return '방금';
+            if (diff < 3600000) return `${Math.floor(diff / 60000)}분 전`;
+            if (diff < 86400000) return `${Math.floor(diff / 3600000)}시간 전`;
+            return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+        }
+
+        function renderTagged(text) {
+            return String(text).replace(/@([\w가-힣]+)/g, '<span class="text-teal-600 font-semibold">@$1</span>');
+        }
+
+        function setupTagInput(el) {
+            if (!el || el._tagSetup) return;
+            el._tagSetup = true;
+            const wrap = el.parentElement;
+            if (!wrap) return;
+            wrap.style.position = 'relative';
+            const dd = document.createElement('div');
+            dd.className = 'absolute left-0 bottom-full mb-1 z-[200] bg-white border border-slate-200 rounded-xl shadow-xl w-full max-h-44 overflow-y-auto hidden';
+            wrap.appendChild(dd);
+
+            const refresh = () => {
+                const val = el.tagName === 'TEXTAREA' ? el.value : el.value;
+                const pos = el.selectionStart != null ? el.selectionStart : val.length;
+                let at = -1;
+                for (let i = pos - 1; i >= 0; i--) {
+                    if (val[i] === '@') { at = i; break; }
+                    if (/[\s\n]/.test(val[i])) break;
+                }
+                if (at < 0) { dd.classList.add('hidden'); return; }
+                const q = val.slice(at + 1, pos).toLowerCase();
+                const hits = USERS_CACHE.filter(u =>
+                    (u.username || '').toLowerCase().includes(q) ||
+                    (u.displayName || '').toLowerCase().includes(q)
+                ).slice(0, 6);
+                if (!hits.length) { dd.classList.add('hidden'); return; }
+                dd.innerHTML = hits.map(u =>
+                    `<div class="tag-opt flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-teal-50" data-un="${esc(u.username)}">
+                        <span class="w-6 h-6 rounded-full bg-teal-100 text-teal-700 text-[10px] font-bold flex items-center justify-center shrink-0">${esc((u.displayName||'?')[0])}</span>
+                        <span class="text-sm font-semibold text-slate-800">${esc(u.displayName)}</span>
+                        <span class="text-xs text-slate-400 ml-auto">@${esc(u.username)}</span>
+                    </div>`
+                ).join('');
+                dd.classList.remove('hidden');
+                dd.querySelectorAll('.tag-opt').forEach(opt => {
+                    opt.addEventListener('mousedown', ev => {
+                        ev.preventDefault();
+                        const un = opt.dataset.un;
+                        const before = val.slice(0, at);
+                        const after = val.slice(pos);
+                        el.value = `${before}@${un} ${after}`;
+                        el.selectionStart = el.selectionEnd = at + un.length + 2;
+                        dd.classList.add('hidden');
+                        el.dispatchEvent(new Event('input'));
+                    });
+                });
+            };
+            el.addEventListener('input', refresh);
+            el.addEventListener('keyup', refresh);
+            el.addEventListener('click', refresh);
+            el.addEventListener('blur', () => setTimeout(() => dd.classList.add('hidden'), 150));
+        }
+
+        // 담당자 전용 태그 입력: 선택 시 @username 대신 displayName 삽입
+        function setupPersonTagInput(el) {
+            if (!el || el._personTagSetup) return;
+            el._personTagSetup = true;
+            const wrap = el.parentElement;
+            if (!wrap) return;
+            wrap.style.position = 'relative';
+            const dd = document.createElement('div');
+            dd.className = 'absolute left-0 bottom-full mb-1 z-[200] bg-white border border-slate-200 rounded-xl shadow-xl w-full max-h-44 overflow-y-auto hidden';
+            wrap.appendChild(dd);
+            const refresh = () => {
+                const q = (el.value || '').toLowerCase().trim();
+                if (!q) { dd.classList.add('hidden'); return; }
+                const hits = USERS_CACHE.filter(u =>
+                    (u.username || '').toLowerCase().includes(q) ||
+                    (u.displayName || '').toLowerCase().includes(q)
+                ).slice(0, 6);
+                if (!hits.length) { dd.classList.add('hidden'); return; }
+                dd.innerHTML = hits.map(u =>
+                    `<div class="person-opt flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-teal-50" data-name="${esc(u.displayName)}" data-un="${esc(u.username)}">
+                        <span class="w-6 h-6 rounded-full bg-teal-100 text-teal-700 text-[10px] font-bold flex items-center justify-center shrink-0">${esc((u.displayName||'?')[0])}</span>
+                        <span class="text-sm font-semibold text-slate-800">${esc(u.displayName)}</span>
+                        <span class="text-xs text-slate-400 ml-auto">@${esc(u.username)}</span>
+                    </div>`
+                ).join('');
+                dd.classList.remove('hidden');
+                dd.querySelectorAll('.person-opt').forEach(opt => {
+                    opt.addEventListener('mousedown', ev => {
+                        ev.preventDefault();
+                        el.value = opt.dataset.name;
+                        dd.classList.add('hidden');
+                        el.dispatchEvent(new Event('input'));
+                    });
+                });
+            };
+            el.addEventListener('input', refresh);
+            el.addEventListener('keyup', refresh);
+            el.addEventListener('click', refresh);
+            el.addEventListener('blur', () => setTimeout(() => dd.classList.add('hidden'), 150));
         }
 
         function buildMergedReservations(dayRaw, dayFixedList) {
@@ -164,6 +594,33 @@
 
         function showModal(id) { document.getElementById(id)?.classList.remove('hidden'); }
         function hideModal(id) { document.getElementById(id)?.classList.add('hidden'); }
+
+        function showConfirm(msg, { title = '확인', okText = '확인', danger = false } = {}) {
+            return new Promise(resolve => {
+                const modal   = document.getElementById('confirm-modal');
+                const titleEl = document.getElementById('confirm-modal-title');
+                const msgEl   = document.getElementById('confirm-modal-msg');
+                const okBtn   = document.getElementById('confirm-modal-ok');
+                const cancelBtn = document.getElementById('confirm-modal-cancel');
+                const header  = document.getElementById('confirm-modal-header');
+                const icon    = document.getElementById('confirm-modal-icon');
+                if (!modal) { resolve(window.confirm(msg)); return; }
+
+                if (titleEl) titleEl.textContent = title;
+                if (msgEl)   msgEl.textContent = msg;
+                if (okBtn)   { okBtn.textContent = okText; okBtn.className = `flex-1 py-2.5 rounded-xl text-sm font-bold text-white transition-colors ${danger ? 'bg-red-600 hover:bg-red-700' : 'bg-teal-600 hover:bg-teal-700'}`; }
+                if (header)  header.className = `h-1.5 w-full ${danger ? 'bg-red-500' : 'bg-amber-400'}`;
+                if (icon)    icon.className = `w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${danger ? 'bg-red-50' : 'bg-amber-50'}`;
+
+                modal.classList.remove('hidden');
+                lucide.createIcons();
+
+                const cleanup = () => modal.classList.add('hidden');
+                okBtn.onclick     = () => { cleanup(); resolve(true); };
+                cancelBtn.onclick = () => { cleanup(); resolve(false); };
+                document.getElementById('confirm-modal-backdrop').onclick = () => { cleanup(); resolve(false); };
+            });
+        }
 
         function expandHourRange(startHour, endHour) {
             const si = HOURS.indexOf(startHour);
@@ -232,11 +689,12 @@
         async function doLogout() {
             if (currentUser) {
                 await addLoginLog(currentUser.id, currentUser.username, 'logout', currentUser.displayName);
+                await clearPresence();
             }
             await signOut(auth);
             currentUser = null; selectedTeamId = null;
             clearAllSubscriptions();
-            updateHeader(); renderTeamSelectors(); renderAdminSection(); renderTable();
+            updateHeader(); renderTeamSelectors(); renderAdminSection(); renderTable(); renderMobileTeamSelectors(); updateMobileBottomBar();
             showToast('로그아웃되었습니다.', 'info');
             setTimeout(() => showModal('login-modal'), 400);
         }
@@ -270,21 +728,208 @@
             subscribeToFixedSchedules();
             subscribeToReservations();
             subscribeToActivityLogs();
+            subscribeRoomBlocks();
+            setupPresence();
+            subscribePresence();
+            subscribeNotifications();
         }
 
         function clearAllSubscriptions() {
             if (unsubFixed) { unsubFixed(); unsubFixed = null; }
             if (unsubReservations) { unsubReservations(); unsubReservations = null; }
             if (unsubLogs) { unsubLogs(); unsubLogs = null; }
+            if (unsubPresence) { unsubPresence(); unsubPresence = null; }
+            if (unsubNotifications) { unsubNotifications(); unsubNotifications = null; }
+            if (unsubRoomBlocks) { unsubRoomBlocks(); unsubRoomBlocks = null; }
+            if (presenceInterval) { clearInterval(presenceInterval); presenceInterval = null; }
             rawReservations = {};
             fixedSchedules = [];
             activityLogs = [];
+            roomBlocks = [];
+            onlineCount = 0;
+            unreadNotifCount = 0;
+        }
+
+        // ==================== PRESENCE (접속자 수) ====================
+        async function setupPresence() {
+            if (!currentUser) return;
+            const presenceRef = doc(db, 'active_sessions', currentUser.id);
+            const write = () => setDoc(presenceRef, {
+                username: currentUser.username,
+                displayName: currentUser.displayName,
+                role: currentUser.role,
+                lastSeen: Date.now()
+            }).catch(() => {});
+            await write();
+            presenceInterval = setInterval(write, 55000);
+            window.addEventListener('beforeunload', () => { deleteDoc(presenceRef).catch(() => {}); });
+        }
+
+        async function clearPresence() {
+            if (!currentUser) return;
+            if (presenceInterval) { clearInterval(presenceInterval); presenceInterval = null; }
+            try { await deleteDoc(doc(db, 'active_sessions', currentUser.id)); } catch {}
+        }
+
+        function subscribePresence() {
+            if (unsubPresence) { unsubPresence(); unsubPresence = null; }
+            let interval;
+            async function fetchPresence() {
+                try {
+                    const threshold = Date.now() - 3 * 60 * 1000;
+                    const snap = await getDocs(query(
+                        collection(db, 'active_sessions'),
+                        where('lastSeen', '>', threshold)
+                    ));
+                    onlineCount = snap.size;
+                    renderOnlineCount();
+                } catch {}
+            }
+            fetchPresence();
+            interval = setInterval(fetchPresence, 60000);
+            unsubPresence = () => clearInterval(interval);
+        }
+
+        function renderOnlineCount() {
+            const el = document.getElementById('online-count-badge');
+            if (!el) return;
+            el.textContent = `${onlineCount}명 접속 중`;
+            el.classList.toggle('hidden', onlineCount === 0);
+        }
+
+        // ==================== ONESIGNAL PUSH ====================
+        // Init happens in the non-module <script> in <head>. Here we only login after auth.
+        function initOneSignal() {
+            if (!currentUser || !window.__osPushOk) return;
+            window.OneSignalDeferred = window.OneSignalDeferred || [];
+            window.OneSignalDeferred.push(async function(OneSignal) {
+                try { await OneSignal.login(currentUser.id); } catch {}
+            });
+        }
+
+        function promptPushPermission() {
+            if (!window.__osPushOk) {
+                showToast('푸시 알림을 현재 사용할 수 없습니다. 페이지를 새로고침 후 다시 시도하세요.', 'error');
+                return;
+            }
+            window.OneSignalDeferred = window.OneSignalDeferred || [];
+            window.OneSignalDeferred.push(async function(OneSignal) {
+                try { await OneSignal.Slidedown.promptPush(); } catch {}
+            });
+        }
+
+        async function sendOnesignalPush(externalUserIds, title, body) {
+            if (!externalUserIds?.length || ONESIGNAL_REST_API_KEY === 'YOUR_ONESIGNAL_REST_KEY') return;
+            try {
+                await fetch('https://onesignal.com/api/v1/notifications', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Key ${ONESIGNAL_REST_API_KEY}`
+                    },
+                    body: JSON.stringify({
+                        app_id: ONESIGNAL_APP_ID,
+                        include_aliases: { external_id: externalUserIds },
+                        target_channel: 'push',
+                        headings: { ko: title, en: title },
+                        contents: { ko: body, en: body }
+                    })
+                });
+            } catch {}
+        }
+
+        // ==================== NOTIFICATIONS (알림) ====================
+        function subscribeNotifications() {
+            if (!currentUser) return;
+            if (unsubNotifications) { unsubNotifications(); unsubNotifications = null; }
+            const q = query(
+                collection(db, `notifications/${currentUser.id}/items`),
+                orderBy('createdAt', 'desc'),
+                limit(30)
+            );
+            unsubNotifications = onSnapshot(q, snap => {
+                unreadNotifCount = snap.docs.filter(d => !d.data().read).length;
+                renderNotifBadge();
+            });
+        }
+
+        async function sendMentionNotifications(text, context) {
+            const mentions = [...new Set((text.match(/@([\w가-힣]+)/g) || []).map(m => m.slice(1)))];
+            for (const username of mentions) {
+                const u = USERS_CACHE.find(u => u.username === username);
+                if (!u || u.id === currentUser.id) continue;
+                await addDoc(collection(db, `notifications/${u.id}/items`), {
+                    type: 'mention',
+                    from: currentUser.username,
+                    fromDisplay: currentUser.displayName,
+                    text: text.slice(0, 100),
+                    context,
+                    read: false,
+                    createdAt: new Date().toISOString()
+                }).catch(() => {});
+            }
+        }
+
+        async function markAllNotifsRead() {
+            if (!currentUser) return;
+            const q = query(collection(db, `notifications/${currentUser.id}/items`), where('read', '==', false));
+            const snap = await getDocs(q);
+            const batch = writeBatch(db);
+            snap.docs.forEach(d => batch.update(d.ref, { read: true }));
+            await batch.commit().catch(() => {});
+        }
+
+        function renderNotifBadge() {
+            const badge = document.getElementById('notif-badge');
+            if (!badge) return;
+            badge.textContent = unreadNotifCount > 9 ? '9+' : unreadNotifCount;
+            badge.classList.toggle('hidden', unreadNotifCount === 0);
+        }
+
+        async function toggleNotifPanel() {
+            const panel = document.getElementById('notif-panel');
+            if (!panel) return;
+            if (!panel.classList.contains('hidden')) { panel.classList.add('hidden'); return; }
+            panel.innerHTML = `<div class="p-4 text-center text-slate-400 text-xs">로딩 중...</div>`;
+            panel.classList.remove('hidden');
+
+            const snap = await getDocs(query(
+                collection(db, `notifications/${currentUser.id}/items`),
+                orderBy('createdAt', 'desc'), limit(20)
+            ));
+            const pushSupported = 'Notification' in window && window.__osPushOk;
+            const pushBanner = pushSupported && Notification.permission === 'default'
+                ? `<div class="flex items-center justify-between px-4 py-2.5 bg-indigo-50 border-b border-indigo-100">
+                    <span class="text-[11px] text-indigo-700 font-medium">📲 푸시 알림을 허용하면 앱 밖에서도 알림을 받아요</span>
+                    <button onclick="promptPushPermission()" class="text-[10px] font-bold text-white bg-indigo-500 hover:bg-indigo-600 px-2 py-1 rounded-lg shrink-0 ml-2">허용</button>
+                  </div>` : '';
+            if (snap.empty) {
+                panel.innerHTML = pushBanner + `<div class="p-5 text-center text-slate-400 text-xs">알림이 없습니다.</div>`;
+            } else {
+                panel.innerHTML = pushBanner + `
+                    <div class="flex items-center justify-between px-4 py-2.5 border-b border-slate-100">
+                        <span class="text-xs font-bold text-slate-700">알림</span>
+                        <button onclick="markAllNotifsRead().then(()=>document.getElementById('notif-panel').classList.add('hidden'))" class="text-[10px] text-teal-600 hover:underline">모두 읽음</button>
+                    </div>
+                    <div class="max-h-80 overflow-y-auto">
+                    ${snap.docs.map(d => {
+                        const n = d.data();
+                        return `<div class="px-4 py-3 border-b border-slate-50 ${n.read ? '' : 'bg-teal-50'} hover:bg-slate-50 transition-colors">
+                            <p class="text-xs font-semibold text-slate-800"><span class="text-teal-600">@${esc(n.fromDisplay||n.from)}</span>님이 회원님을 멘션했습니다.</p>
+                            <p class="text-[10px] text-slate-500 mt-0.5 line-clamp-2">${esc(n.text)}</p>
+                            <p class="text-[9px] text-slate-400 mt-1">${formatTime(n.createdAt)}</p>
+                        </div>`;
+                    }).join('')}
+                    </div>`;
+            }
+            await markAllNotifsRead();
         }
 
         function updateMergedReservationsAndRender() {
             const df = fixedSchedules.filter(fs => fs.day === activeDay);
             reservations = buildMergedReservations(rawReservations, df);
             renderTable();
+            if (selectedReservationContext) renderReservationDetails();
         }
 
         function subscribeToReservations() {
@@ -319,25 +964,53 @@
             }, err => { console.error(err); showToast('실시간 연결 오류', 'error'); });
         }
 
-        function subscribeToFixedSchedules() {
+        async function subscribeToFixedSchedules() {
             if (unsubFixed) return;
-            const col = collection(db, 'fixed_schedules');
-            unsubFixed = onSnapshot(col, snap => {
+            unsubFixed = () => {};
+            try {
+                const snap = await getDocs(collection(db, 'fixed_schedules'));
                 fixedSchedules = [];
                 snap.forEach(d => { fixedSchedules.push({ id: d.id, ...d.data() }); });
                 updateMergedReservationsAndRender();
-            }, err => { console.error('고정 일정 실시간 구독 실패:', err); });
+            } catch (err) { console.error('고정 일정 로드 실패:', err); }
         }
 
         function subscribeToActivityLogs() {
             if (unsubLogs) return;
-            const col = collection(db, 'activity_logs');
-            const q = query(col, orderBy('timestamp', 'desc'), limit(20));
-            unsubLogs = onSnapshot(q, snap => {
-                activityLogs = [];
-                snap.forEach(d => { activityLogs.push({ id: d.id, ...d.data() }); });
-                renderSideLogs();
-            }, err => { console.error('활동 로그 실시간 구독 실패:', err); });
+            let interval;
+            async function fetchLogs() {
+                try {
+                    const q = query(collection(db, 'activity_logs'), orderBy('timestamp', 'desc'), limit(20));
+                    const snap = await getDocs(q);
+                    activityLogs = [];
+                    snap.forEach(d => { activityLogs.push({ id: d.id, ...d.data() }); });
+                    renderSideLogs();
+                } catch (err) { console.error('활동 로그 로드 실패:', err); }
+            }
+            fetchLogs();
+            interval = setInterval(fetchLogs, 120000);
+            unsubLogs = () => clearInterval(interval);
+        }
+
+        function subscribeRoomBlocks() {
+            if (unsubRoomBlocks) { unsubRoomBlocks(); unsubRoomBlocks = null; }
+            unsubRoomBlocks = onSnapshot(collection(db, 'room_blocks'), snap => {
+                roomBlocks = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+                renderTable();
+                if (!document.getElementById('room-block-modal')?.classList.contains('hidden')) {
+                    renderRoomBlockList();
+                }
+            }, () => {});
+        }
+
+        function getRoomBlock(hour, room) {
+            const h = parseInt(hour);
+            return roomBlocks.find(b =>
+                b.room === room &&
+                b.day === activeDay &&
+                parseInt(b.startHour) <= h &&
+                parseInt(b.endHour) > h
+            ) || null;
         }
 
         async function loadTeamsFromDB() {
@@ -357,6 +1030,7 @@
                 }
             } catch (e) { /* fallback to DEFAULT_TEAMS */ }
             renderTeamSelectors();
+            renderTeamColorLegend();
             renderTable();
         }
 
@@ -398,6 +1072,85 @@
         }
 
         // ==================== RESERVATIONS ====================
+        function openBookingModal({ hour = null, room = null, isRange = false, preHour = null, preRoom = null } = {}) {
+            return new Promise(resolve => {
+                const modal = document.getElementById('booking-modal');
+                if (!modal) { resolve(null); return; }
+
+                const subtitle = document.getElementById('booking-modal-subtitle');
+                if (subtitle) subtitle.textContent = isRange ? '범위 예약' : `${hour} · ${room}`;
+
+                const rangeSection = document.getElementById('booking-range-section');
+                rangeSection?.classList.toggle('hidden', !isRange);
+
+                if (isRange) {
+                    const roomSel = document.getElementById('bm-room');
+                    const startSel = document.getElementById('bm-start');
+                    const endSel = document.getElementById('bm-end');
+                    if (roomSel && roomSel.options.length === 0) {
+                        ALL_ROOMS.forEach(r => roomSel.appendChild(new Option(r, r)));
+                    }
+                    if (startSel && startSel.options.length === 0) {
+                        HOURS.forEach(h => { const hh = parseInt(h); startSel.appendChild(new Option(h, hh)); });
+                    }
+                    if (endSel && endSel.options.length === 0) {
+                        for (let h = 10; h <= 22; h++) endSel.appendChild(new Option(`${String(h).padStart(2,'0')}:00`, h));
+                    }
+                    const defaultStartH = preHour ? parseInt(preHour) : 9;
+                    if (startSel) startSel.value = String(defaultStartH);
+                    if (endSel) endSel.value = String(Math.min(defaultStartH + 2, 22));
+                    if (preRoom && roomSel) roomSel.value = preRoom;
+                }
+
+                const personInput = document.getElementById('bm-person');
+                if (personInput) personInput.value = currentUser?.displayName || '';
+
+                const lessonInput = document.getElementById('bm-lesson');
+                const reasonInput = document.getElementById('bm-reason');
+                const memoInput = document.getElementById('bm-memo');
+                // 선택된 활동단 이름으로 수업명 자동 반영
+                const autoTeam = selectedTeamId ? getTeam(selectedTeamId) : null;
+                if (lessonInput) lessonInput.value = autoTeam ? autoTeam.name : '';
+                if (reasonInput) reasonInput.value = '';
+                if (memoInput) memoInput.value = '';
+
+                showModal('booking-modal');
+                (lessonInput || reasonInput)?.focus();
+
+                // 담당자 태그 기능 (이름으로 표시)
+                setupPersonTagInput(document.getElementById('bm-person'));
+                setupTagInput(document.getElementById('bm-memo'));
+
+                const getResult = () => ({
+                    lessonName: lessonInput?.value.trim().slice(0, 30) || '',
+                    userName: personInput?.value.trim().slice(0, 20) || (currentUser?.displayName || ''),
+                    note: reasonInput?.value.trim().slice(0, 50) || '',
+                    memo: memoInput?.value.trim().slice(0, 100) || '',
+                    ...(isRange ? {
+                        room: document.getElementById('bm-room')?.value,
+                        startH: parseInt(document.getElementById('bm-start')?.value || '9'),
+                        endH: parseInt(document.getElementById('bm-end')?.value || '11'),
+                    } : { room, hour })
+                });
+
+                const submitBtn = document.getElementById('bm-submit');
+                const cancelBtn = document.getElementById('bm-cancel');
+
+                const cleanup = () => {
+                    hideModal('booking-modal');
+                    submitBtn.removeEventListener('click', onSubmit);
+                    cancelBtn.removeEventListener('click', onCancel);
+                    modal.removeEventListener('click', onBackdrop);
+                };
+                const onSubmit = () => { cleanup(); resolve(getResult()); };
+                const onCancel = () => { cleanup(); resolve(null); };
+                const onBackdrop = e => { if (e.target?.dataset?.closeModal === 'booking-modal') { cleanup(); resolve(null); } };
+                submitBtn.addEventListener('click', onSubmit);
+                cancelBtn.addEventListener('click', onCancel);
+                modal.addEventListener('click', onBackdrop);
+            });
+        }
+
         async function makeReservation(hour, room) {
             if (!currentUser) { showToast('로그인이 필요합니다.', 'error'); return; }
             if (!selectedTeamId) { showToast('활동단을 선택해주세요.', 'error'); return; }
@@ -406,16 +1159,16 @@
             const team = getTeam(selectedTeamId);
             if (!team) return;
 
-            const note = prompt('예약 메모나 목적을 입력해 주세요. (생략 가능, 최대 50자)');
-            if (note === null) return;
+            const bookingData = await openBookingModal({ hour, room });
+            if (bookingData === null) return;
 
-            const resData = { 
-                teamId: team.id, 
-                teamName: team.name, 
-                userName: currentUser.displayName, 
-                userId: currentUser.id, 
-                isFixed: false,
-                note: note.trim().slice(0, 50)
+            const resData = {
+                teamId: team.id, teamName: team.name,
+                userName: bookingData.userName || currentUser.displayName,
+                userId: currentUser.id, isFixed: false,
+                lessonName: bookingData.lessonName,
+                note: bookingData.note,
+                memo: bookingData.memo,
             };
 
             const docRef = doc(db, `reservations/${currentWeekId}/${activeDay}`, key);
@@ -426,9 +1179,74 @@
                     tx.set(docRef, { ...resData, createdAt: serverTimestamp() });
                 });
                 await addActivityLog('예약_생성', `${activeDay} ${hour} ${room}`, null, resData);
+                notifyTeamLead(team.id, '새 예약', `${activeDay} ${hour} ${room}`);
                 showToast(`${team.name} 예약 완료!`, 'success');
                 syncGoogleSheets('reserve', activeDay, hour, room, team.name, currentUser.displayName, resData.note);
             } catch (e) { showToast(e.message || '예약 실패', 'error'); }
+        }
+
+        function openCancelReservationModal(hour, room, existing, action) {
+            return new Promise(resolve => {
+                const modal = document.getElementById('cancel-reservation-modal');
+                const title = document.getElementById('cancel-modal-title');
+                const summary = document.getElementById('cancel-modal-summary');
+                const reasonWrap = document.getElementById('cancel-reason-wrap');
+                const reasonInput = document.getElementById('cancel-reason-input');
+                const submitBtn = document.getElementById('cancel-modal-submit');
+                const closeBtn = document.getElementById('cancel-modal-close');
+                const needReason = isAdmin() && (action === '예약_강제취소' || action === '고정일정_삭제');
+
+                if (!modal || !submitBtn || !closeBtn) {
+                    showConfirm(`[${hour}] ${room}\n${existing.teamName} 예약을 취소하시겠습니까?`, { title: '예약 취소', okText: '취소하기', danger: true })
+                        .then(ok => {
+                            if (!ok) { resolve(null); return; }
+                            if (needReason) {
+                                const reason = prompt('강제 취소 사유(메모)를 입력해 주세요. (생략 가능, 최대 50자)');
+                                resolve(reason === null ? null : reason.trim().slice(0, 50));
+                            } else {
+                                resolve('');
+                            }
+                        });
+                    return;
+                }
+
+                if (title) title.textContent = existing.isFixed ? '고정 일정 삭제' : '예약 취소';
+                if (summary) {
+                    summary.innerHTML = `
+                        <div class="font-bold text-slate-900">${esc(existing.teamName)}</div>
+                        <div class="text-xs text-slate-500 mt-1">${esc(hour)} · ${esc(room)} · ${esc(existing.userName || '예약자 없음')}</div>
+                    `;
+                }
+                if (reasonWrap) reasonWrap.classList.toggle('hidden', !needReason);
+                if (reasonInput) {
+                    reasonInput.value = '';
+                    reasonInput.placeholder = needReason ? '예: 센터 행사 사용, 중복 예약 정리 등' : '취소 메모';
+                }
+                showModal('cancel-reservation-modal');
+                if (needReason && reasonInput) reasonInput.focus();
+
+                const cleanup = result => {
+                    hideModal('cancel-reservation-modal');
+                    submitBtn.removeEventListener('click', onSubmit);
+                    closeBtn.removeEventListener('click', onClose);
+                    modal.removeEventListener('click', onBackdrop);
+                    reasonInput?.removeEventListener('keydown', onKeydown);
+                    resolve(result);
+                };
+                const onSubmit = () => cleanup(needReason ? (reasonInput?.value || '').trim().slice(0, 50) : '');
+                const onClose = () => cleanup(null);
+                const onBackdrop = e => {
+                    if (e.target?.dataset?.closeModal === 'cancel-reservation-modal') cleanup(null);
+                };
+                const onKeydown = e => {
+                    if (e.key === 'Escape') cleanup(null);
+                    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') onSubmit();
+                };
+                submitBtn.addEventListener('click', onSubmit);
+                closeBtn.addEventListener('click', onClose);
+                modal.addEventListener('click', onBackdrop);
+                reasonInput?.addEventListener('keydown', onKeydown);
+            });
         }
 
         async function cancelReservation(hour, room) {
@@ -438,17 +1256,12 @@
             if (existing.isFixed && !isAdmin()) { showToast('고정 일정은 관리자만 취소할 수 있습니다.', 'error'); return; }
             const cancel = isAdmin() || (currentUser.allowedTeams || []).includes(existing.teamId);
             if (!cancel) { showToast('본인 활동단 예약만 취소할 수 있습니다.', 'error'); return; }
-            if (!confirm(`[${hour} - ${room}]\n${existing.teamName} 예약을 취소하시겠습니까?`)) return;
 
             const forced = isAdmin() && existing.userId !== currentUser.id;
             const action = existing.isFixed ? '고정일정_삭제' : (forced ? '예약_강제취소' : '예약_취소');
 
-            let cancelNote = '';
-            if (isAdmin() && (action === '예약_강제취소' || action === '고정일정_삭제')) {
-                const reason = prompt('강제 취소 사유(메모)를 입력해 주세요. (생략 가능, 최대 50자)');
-                if (reason === null) return;
-                cancelNote = reason.trim().slice(0, 50);
-            }
+            const cancelNote = await openCancelReservationModal(hour, room, existing, action);
+            if (cancelNote === null) return;
 
             window.isCancellingLocal = true;
 
@@ -467,12 +1280,230 @@
                 }
                 const targetDesc = `${activeDay} ${hour} ${room} [기존: ${existing.teamName} / 예약자: ${existing.userName}]`;
                 await addActivityLog(action, targetDesc, existing, cancelNote ? { note: cancelNote } : null);
+                notifyTeamLead(existing.teamId, '예약 취소', `${activeDay} ${hour} ${room}`);
                 showToast('예약이 취소되었습니다.', 'success');
                 syncGoogleSheets('cancel', activeDay, hour, room, existing.teamName, existing.userName, '');
+                closeReservationDetails();
             } catch (e) { 
                 showToast('취소 실패: ' + e.message, 'error'); 
             } finally {
                 window.isCancellingLocal = false;
+            }
+        }
+
+        async function updateReservationDetails() {
+            if (!selectedReservationContext || !currentUser) return;
+            const { hour, room, key } = selectedReservationContext;
+            const existing = reservations[key];
+            if (!existing) { closeReservationDetails(); return; }
+            if (existing.isFixed) { showToast('고정 일정은 관리자 고정 일정 메뉴에서 수정해 주세요.', 'error'); return; }
+            const canEdit = isAdmin() || (currentUser.allowedTeams || []).includes(existing.teamId);
+            if (!canEdit) { showToast('수정 권한이 없습니다.', 'error'); return; }
+
+            const teamSelect = document.getElementById('detail-team');
+            const customTeam = document.getElementById('detail-team-custom');
+            const userName = document.getElementById('detail-user-name');
+            const note = document.getElementById('detail-note');
+            const selectedTeam = teamSelect?.value || 'external';
+            const matchedTeam = selectedTeam === 'external' ? null : getTeam(selectedTeam);
+            const nextTeamName = matchedTeam ? matchedTeam.name : (customTeam?.value || existing.teamName || '외부예약').trim().slice(0, 40);
+            const colorHexRaw = (document.getElementById('detail-sheet-color-hex')?.value || '').trim();
+            const newSheetColor = isValidHexColor(colorHexRaw) ? colorHexRaw.toLowerCase() : '';
+            const nextData = {
+                teamId: matchedTeam ? matchedTeam.id : 'external',
+                teamName: nextTeamName || '외부예약',
+                userName: (userName?.value || '').trim().slice(0, 40) || '외부예약',
+                note: (note?.value || '').trim().slice(0, 120),
+                sheetColor: newSheetColor,
+                sheetOwner: newSheetColor ? (currentUser.displayName || currentUser.username || '') : '',
+                updatedAt: serverTimestamp(),
+                updatedBy: currentUser.displayName || currentUser.username || ''
+            };
+
+            try {
+                await setDoc(doc(db, `reservations/${currentWeekId}/${activeDay}`, key), nextData, { merge: true });
+                await addActivityLog('예약_수정', `${activeDay} ${hour} ${room}`, existing, nextData);
+                syncGoogleSheets('reserve', activeDay, hour, room, nextData.teamName, nextData.userName, nextData.note);
+                if (nextData.note) await sendMentionNotifications(nextData.note, { type: 'memo', key });
+                notifyTeamLead(nextData.teamId, '예약 수정', `${activeDay} ${hour} ${room}`);
+                showToast('세부 설정이 저장되었습니다.', 'success');
+                selectedReservationContext = { hour, room, key };
+                renderReservationDetails();
+            } catch (e) {
+                showToast('저장 실패: ' + e.message, 'error');
+            }
+        }
+
+        async function addComment(key, text) {
+            if (!text.trim() || !currentUser) return;
+            const trimmed = text.trim().slice(0, 300);
+            const comment = {
+                text: trimmed,
+                author: currentUser.displayName || currentUser.username,
+                userId: currentUser.id,
+                createdAt: new Date().toISOString()
+            };
+            await setDoc(doc(db, `reservations/${currentWeekId}/${activeDay}`, key), { comments: arrayUnion(comment) }, { merge: true });
+            await sendMentionNotifications(trimmed, { type: 'comment', key });
+        }
+
+        // ==================== TEAM LEADER NOTIFICATION (A-5) ====================
+        async function notifyTeamLead(teamId, actionLabel, detail) {
+            const team = getTeam(teamId);
+            if (!team) return;
+            const msg = `[유스나루 예약] ${actionLabel}\n활동단: ${team.name}\n${detail}\n담당자: ${currentUser?.displayName || ''}`;
+
+            // leaderIds 배열 우선, 없으면 레거시 leaderId 사용
+            const allLeaderIds = team.leaderIds?.length ? team.leaderIds : (team.leaderId ? [team.leaderId] : []);
+            const otherLeaderIds = allLeaderIds.filter(id => id !== currentUser?.id);
+
+            for (const leaderId of otherLeaderIds) {
+                addDoc(collection(db, `notifications/${leaderId}/items`), {
+                    type: 'reservation',
+                    from: currentUser?.username || '',
+                    fromDisplay: currentUser?.displayName || '',
+                    text: msg.slice(0, 200),
+                    context: { type: 'team_lead', teamId },
+                    read: false,
+                    createdAt: new Date().toISOString()
+                }).catch(() => {});
+            }
+
+            // OneSignal 푸시 알림
+            sendOnesignalPush(otherLeaderIds, `[유스나루] ${actionLabel}`, `${team.name} · ${detail}`);
+
+            if (team.slackWebhookUrl) {
+                const params = new URLSearchParams();
+                params.set('payload', JSON.stringify({ text: msg }));
+                fetch(team.slackWebhookUrl, { method: 'POST', mode: 'no-cors', body: params }).catch(() => {});
+            }
+        }
+
+        // ==================== RANGE RESERVATION (A-4) ====================
+        async function showRangeReserveModal(preHour = null, preRoom = null) {
+            if (!currentUser) return;
+            const data = await openBookingModal({ isRange: true, preHour, preRoom });
+            if (!data) return;
+
+            const { room, startH, endH, lessonName, userName, note, memo } = data;
+            if (!selectedTeamId || !room) { showToast('활동단과 공간을 선택해주세요.', 'error'); return; }
+            if (endH <= startH) { showToast('종료 시간은 시작 시간보다 늦어야 합니다.', 'error'); return; }
+
+            const team = getTeam(selectedTeamId);
+            if (!team) return;
+            const hours = [];
+            for (let h = startH; h < endH; h++) hours.push(`${String(h).padStart(2,'0')}:00`);
+
+            const skipped = [];
+            for (const hour of hours) {
+                const key = `${hour}-${room}`.replace(/\//g, '_');
+                if (reservations[key]) { skipped.push(hour); continue; }
+                const resData = { teamId: team.id, teamName: team.name, userName: userName || currentUser.displayName, userId: currentUser.id, isFixed: false, lessonName, note, memo };
+                await setDoc(doc(db, `reservations/${currentWeekId}/${activeDay}`, key), { ...resData, createdAt: serverTimestamp() });
+                await addActivityLog('예약_등록', `${activeDay} ${hour} ${room}`, null, resData);
+                syncGoogleSheets('reserve', activeDay, hour, room, team.name, userName || currentUser.displayName, note);
+            }
+
+            if (skipped.length > 0) showToast(`${hours.length - skipped.length}개 등록, ${skipped.length}개 건너뜀 (이미 예약됨)`, 'info');
+            else showToast(`${hours.length}개 시간대 예약 완료.`, 'success');
+            notifyTeamLead(team.id, '범위 예약', `${activeDay} ${hours[0]}~${HOURS[HOURS.indexOf(hours[hours.length-1])+1]||''} ${room}`);
+        }
+        window.showRangeReserveModal = showRangeReserveModal;
+
+        // ==================== MOBILE DRAWER ====================
+        window.openMobileDrawer = function(tab = 'teams') {
+            const overlay = document.getElementById('mobile-drawer-overlay');
+            const drawer = document.getElementById('mobile-drawer');
+            overlay?.classList.remove('hidden');
+            drawer?.classList.remove('hidden');
+            switchMobileDrawerTab(tab);
+            if (tab === 'logs') renderMobileLogs();
+            lucide.createIcons();
+        };
+
+        window.closeMobileDrawer = function() {
+            document.getElementById('mobile-drawer-overlay')?.classList.add('hidden');
+            document.getElementById('mobile-drawer')?.classList.add('hidden');
+        };
+
+        window.switchMobileDrawerTab = function(tab) {
+            ['teams', 'admin', 'logs'].forEach(t => {
+                const panel = document.getElementById(`mobile-panel-${t}`);
+                const btn = document.getElementById(`mobile-dtab-${t}`);
+                if (panel) panel.classList.toggle('hidden', t !== tab);
+                if (btn) {
+                    if (t === tab) { btn.className = btn.className.replace('bg-slate-100 text-slate-500', 'bg-teal-500 text-white'); }
+                    else { btn.className = btn.className.replace('bg-teal-500 text-white', 'bg-slate-100 text-slate-500'); }
+                }
+            });
+        };
+
+        function renderMobileTeamSelectors() {
+            const c = document.getElementById('mobile-team-selectors');
+            if (!c) return;
+            if (!currentUser) {
+                c.innerHTML = `<div class="text-center py-8 text-slate-400"><i data-lucide="lock" class="w-8 h-8 mx-auto mb-2 opacity-30"></i><p class="text-xs font-medium">로그인 후 예약 가능합니다</p></div>`;
+                lucide.createIcons(); return;
+            }
+            const teamsToShow = isAdmin() ? TEAMS : TEAMS.filter(t => (currentUser.allowedTeams || []).includes(t.id));
+            c.innerHTML = '';
+            teamsToShow.forEach(team => {
+                const isSelected = selectedTeamId === team.id;
+                const btn = document.createElement('button');
+                btn.className = `w-full p-2.5 rounded-xl text-left border-2 transition-all ${team.bg} ${team.text} ${team.border} ${isSelected ? 'ring-2 ring-teal-500 ring-offset-1 shadow-sm' : 'hover:opacity-90'}`;
+                btn.innerHTML = `<div class="flex items-center justify-between"><span class="text-xs font-bold">${esc(team.name)}</span>${isSelected ? '<i data-lucide="check-circle" class="w-3.5 h-3.5"></i>' : ''}</div>`;
+                btn.addEventListener('click', () => {
+                    selectedTeamId = isSelected ? null : team.id;
+                    renderTeamSelectors();
+                    renderMobileTeamSelectors();
+                    updateMobileBottomBar();
+                    closeMobileDrawer();
+                });
+                c.appendChild(btn);
+            });
+            lucide.createIcons();
+        }
+
+        function renderMobileLogs() {
+            const c = document.getElementById('mobile-logs-list');
+            if (!c) return;
+            renderSideLogs();
+            const desktopLogs = document.getElementById('side-logs-list');
+            if (desktopLogs) c.innerHTML = desktopLogs.innerHTML;
+        }
+
+        function updateMobileBottomBar() {
+            const bar = document.getElementById('mobile-bottom-bar');
+            const label = document.getElementById('mobile-bottom-team-label');
+            const teamBar = document.getElementById('mobile-team-bar');
+            const teamChip = document.getElementById('mobile-team-chip');
+            if (!bar) return;
+
+            const isMobile = window.innerWidth < 1024;
+            bar.classList.toggle('hidden', !isMobile);
+
+            if (label) {
+                const team = selectedTeamId ? getTeam(selectedTeamId) : null;
+                label.textContent = team ? team.name : '활동단 선택';
+            }
+
+            if (teamBar && teamChip) {
+                const team = selectedTeamId ? getTeam(selectedTeamId) : null;
+                if (team && isMobile) {
+                    teamChip.innerHTML = `<span class="text-xs font-bold px-2 py-0.5 rounded-lg ${team.bg} ${team.text}">${esc(team.name)}</span>`;
+                    teamBar.classList.remove('hidden');
+                } else {
+                    teamChip.innerHTML = '';
+                    teamBar.classList.add('hidden');
+                }
+            }
+
+            const mAdminSection = document.getElementById('mobile-admin-section');
+            const mAdminLocked = document.getElementById('mobile-admin-locked');
+            if (mAdminSection && mAdminLocked) {
+                const admin = isAdmin();
+                mAdminSection.classList.toggle('hidden', !admin);
+                mAdminLocked.classList.toggle('hidden', admin);
             }
         }
 
@@ -497,7 +1528,7 @@
         // ==================== WEEKLY RESET ====================
         async function weeklyReset() {
             if (!isAdmin()) return;
-            if (!confirm(`⚠️ 주간 리셋을 실행합니다.\n\n주차: ${currentWeekId}\n일반 예약이 모두 삭제됩니다. (고정 일정 유지)\n과거 기록에 보관됩니다.\n\n계속하시겠습니까?`)) return;
+            if (!await showConfirm(`주차: ${currentWeekId}\n일반 예약이 모두 삭제됩니다. (고정 일정 유지)\n과거 기록에 보관됩니다.`, { title: '⚠️ 주간 리셋 실행', okText: '리셋', danger: true })) return;
 
             try {
                 const archiveData = {};
@@ -606,11 +1637,17 @@
             const c = document.getElementById('day-tabs');
             if (!c) return;
             c.innerHTML = '';
-            DAYS.forEach(day => {
+            const { start } = getWeekDateRange(currentWeekId);
+            const today = new Date(); today.setHours(0, 0, 0, 0);
+            DAYS.forEach((day, idx) => {
+                const dayDate = new Date(start);
+                dayDate.setDate(start.getDate() + idx);
+                const dateStr = `${dayDate.getMonth() + 1}/${dayDate.getDate()}`;
+                const isToday = dayDate.getTime() === today.getTime();
                 const isActive = day.id === activeDay;
                 const btn = document.createElement('button');
-                btn.className = `flex-1 min-w-[44px] py-2.5 px-1 rounded-xl text-xs font-bold transition-all duration-200 flex flex-col items-center gap-1 ${isActive ? 'bg-white text-teal-700 shadow-sm' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-700'}`;
-                btn.innerHTML = `<span class="w-2 h-2 rounded-full ${day.color}"></span><span>${day.label}</span><span class="text-[9px] font-normal opacity-60 hidden sm:block">${day.fullLabel}</span>`;
+                btn.className = `flex-1 min-w-[44px] py-2 px-1 rounded-xl text-xs font-bold transition-all duration-200 flex flex-col items-center gap-0.5 ${isActive ? 'bg-white text-teal-700 shadow-sm' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-700'}`;
+                btn.innerHTML = `<span class="text-[9px] font-semibold ${isToday ? (isActive ? 'text-teal-500' : 'text-teal-400') : 'opacity-40 font-normal'}">${dateStr}</span><span>${day.label}</span>`;
                 btn.addEventListener('click', () => switchDay(day.id));
                 c.appendChild(btn);
             });
@@ -647,12 +1684,271 @@
             });
             if (teamsToShow.length === 1 && !selectedTeamId) { selectedTeamId = teamsToShow[0].id; renderTeamSelectors(); return; }
             lucide.createIcons();
+            renderTeamColorLegend();
+        }
+
+        function renderTeamColorLegend() {
+            const c = document.getElementById('team-color-legend');
+            if (!c) return;
+            c.innerHTML = TEAMS.map(t => {
+                const dotCls = t.bg.replace('bg-', 'bg-').replace('-100', '-400');
+                return `<div class="flex items-center gap-1.5 ${t.bg} ${t.border} border rounded-lg px-2 py-1 overflow-hidden">
+                    <span class="w-2 h-2 rounded-full ${dotCls} shrink-0"></span>
+                    <span class="text-[9px] font-bold ${t.text} truncate min-w-0">${esc(t.name)}</span>
+                </div>`;
+            }).join('');
+        }
+
+        function renderTableHeader() {
+            const head = document.getElementById('schedule-head');
+            if (!head) return;
+            head.innerHTML = `
+                <tr class="border-b border-slate-200">
+                    <th class="py-2 px-3 text-center text-[10px] font-bold text-slate-400 border-r border-slate-200 w-16 bg-slate-50">시간</th>
+                    ${FLOORS.map(floor => `<th colspan="${floor.rooms.length}" class="py-2 px-3 text-center text-[10px] font-bold text-slate-700 border-r-2 border-slate-300 bg-slate-50/90">${esc(floor.label)}</th>`).join('')}
+                </tr>
+                <tr class="bg-slate-50 border-b-2 border-slate-200 text-center">
+                    <th class="py-2 px-1 text-[10px] font-bold text-slate-400 border-r border-slate-200 bg-slate-100 w-16">구분</th>
+                    ${FLOORS.flatMap(floor => floor.rooms.map((room, idx) => {
+                        const isLast = idx === floor.rooms.length - 1;
+                        return `<th class="py-2 px-1 text-[10px] font-bold text-slate-600 whitespace-nowrap ${isLast ? 'border-r-2 border-slate-300' : 'border-r border-slate-100'} bg-slate-50 min-w-[110px]">${esc(room)}</th>`;
+                    })).join('')}
+                </tr>
+            `;
+        }
+
+        function getReservationCardStyle(res, team) {
+            const sheetColor = normalizeColor(res?.sheetColor);
+            if (!team && sheetColor) {
+                const textColor = getTextColorForBg(sheetColor);
+                return {
+                    className: 'border-slate-200',
+                    style: `background:${sheetColor};border-color:${sheetColor};color:${textColor};`
+                };
+            }
+            if (team) {
+                return { className: `${team.bg} ${team.text} ${team.border}`, style: '' };
+            }
+            return { className: 'bg-slate-50 text-slate-500 border-slate-200', style: '' };
+        }
+
+        function getReservationByContext(hour, room) {
+            const key = `${hour}-${room}`.replace(/\//g, '_');
+            return { key, res: reservations[key] || null };
+        }
+
+        function canEditReservation(res) {
+            return !!(currentUser && res && (isAdmin() || (currentUser.allowedTeams || []).includes(res.teamId)) && (!res.isFixed || isAdmin()));
+        }
+
+        function openReservationDetails(hour, room) {
+            const { key, res } = getReservationByContext(hour, room);
+            if (!res) return;
+            selectedReservationContext = { hour, room, key };
+            renderReservationDetails();
+            showModal('reservation-detail-drawer');
+        }
+
+        function closeReservationDetails() {
+            selectedReservationContext = null;
+            hideModal('reservation-detail-drawer');
+        }
+
+        function renderReservationDetails() {
+            const content = document.getElementById('reservation-detail-content');
+            if (!content) return;
+            if (!selectedReservationContext) {
+                content.innerHTML = '';
+                return;
+            }
+            const { hour, room, key } = selectedReservationContext;
+            const res = reservations[key];
+            if (!res) {
+                content.innerHTML = `<div class="p-5 text-sm text-slate-500">예약이 삭제되었습니다.</div>`;
+                return;
+            }
+            const team = getTeam(res.teamId);
+            const editable = canEditReservation(res) && !res.isFixed;
+            const cancellable = canEditReservation(res);
+            const sheetColor = normalizeColor(res.sheetColor);
+            const selectedTeamId = team ? team.id : 'external';
+            const teamOptions = [
+                `<option value="external" ${selectedTeamId === 'external' ? 'selected' : ''}>직접 입력 / 외부 예약</option>`,
+                ...TEAMS.map(t => `<option value="${esc(t.id)}" ${selectedTeamId === t.id ? 'selected' : ''}>${esc(t.name)}</option>`)
+            ].join('');
+
+            content.innerHTML = `
+                <div class="p-5 border-b border-slate-100">
+                    <div class="flex items-start justify-between gap-3">
+                        <div>
+                            <p class="text-[11px] font-bold text-teal-600 mb-1">${DAYS.find(d => d.id === activeDay)?.fullLabel || activeDay} · ${esc(hour)} · ${esc(room)}</p>
+                            <h2 class="text-lg font-black text-slate-900 leading-tight">${esc(res.teamName || '예약')}</h2>
+                            <p class="text-xs text-slate-400 mt-1">${res.isFixed ? '고정 일정' : '일반 예약'}${res.sheetOwner ? ` · ${esc(res.sheetOwner)}` : ''}</p>
+                        </div>
+                        <button id="reservation-detail-close" class="p-2 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition-colors" title="닫기">
+                            <i data-lucide="x" class="w-5 h-5"></i>
+                        </button>
+                    </div>
+                    ${sheetColor ? `<div class="mt-4 flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                        <span class="w-5 h-5 rounded border border-slate-300" style="background:${sheetColor}"></span>
+                        <div>
+                            <div class="text-[11px] font-bold text-slate-700">시트 색상</div>
+                            <div class="text-[10px] text-slate-400">${sheetColor}${res.sheetOwner ? ` · ${esc(res.sheetOwner)}` : ' · 담당자 미지정'}</div>
+                        </div>
+                    </div>` : ''}
+                </div>
+                <div class="p-5 space-y-4">
+                    <div>
+                        <label class="block text-xs font-bold text-slate-600 mb-1.5">수업 변경</label>
+                        <select id="detail-team" ${editable ? '' : 'disabled'} class="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-teal-400 disabled:bg-slate-50 disabled:text-slate-400">
+                            ${teamOptions}
+                        </select>
+                    </div>
+                    <div id="detail-team-custom-wrap" class="${selectedTeamId === 'external' ? '' : 'hidden'}">
+                        <label class="block text-xs font-bold text-slate-600 mb-1.5">수업명 직접 입력</label>
+                        <input id="detail-team-custom" ${editable ? '' : 'disabled'} value="${esc(team ? '' : res.teamName || '')}" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-400 disabled:bg-slate-50">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-slate-600 mb-1.5">담당자 변경</label>
+                        <div class="relative">
+                            <input id="detail-user-name" ${editable ? '' : 'disabled'} value="${esc(res.userName || '')}" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-400 disabled:bg-slate-50" placeholder="담당자 이름 또는 @아이디">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-slate-600 mb-1.5">시트 색상</label>
+                        <div class="flex items-center gap-2">
+                            <input type="color" id="detail-sheet-color-picker" value="${sheetColor || '#ffffff'}" ${editable ? '' : 'disabled'} class="w-9 h-9 rounded border border-slate-200 cursor-pointer disabled:cursor-not-allowed p-0.5">
+                            <input id="detail-sheet-color-hex" value="${sheetColor || ''}" ${editable ? '' : 'disabled'} placeholder="#없음 (색상 없음)" maxlength="7" class="flex-1 px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-400 font-mono disabled:bg-slate-50">
+                            ${editable ? `<button id="detail-sheet-color-clear" type="button" class="px-2.5 py-2 text-xs text-slate-400 hover:text-red-500 border border-slate-200 rounded-lg hover:border-red-200 transition-colors" title="색상 제거">✕</button>` : ''}
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-slate-600 mb-1.5">메모</label>
+                        <div class="relative">
+                            <textarea id="detail-note" ${editable ? '' : 'disabled'} rows="3" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-400 resize-none disabled:bg-slate-50" placeholder="예약 관련 메모를 입력하세요 (@로 태그)">${esc(res.note || '')}</textarea>
+                        </div>
+                    </div>
+                    ${!editable && res.isFixed ? `<div class="rounded-lg bg-blue-50 border border-blue-100 text-blue-700 text-xs px-3 py-2">고정 일정은 관리자 고정 일정 메뉴에서 수정할 수 있습니다.</div>` : ''}
+                </div>
+                <div class="p-5 border-t border-slate-100 bg-slate-50 flex gap-2">
+                    <button id="reservation-detail-save" ${editable ? '' : 'disabled'} class="flex-1 py-2.5 rounded-lg text-sm font-bold bg-teal-600 text-white hover:bg-teal-700 disabled:bg-slate-200 disabled:text-slate-400 transition-colors flex items-center justify-center gap-1.5">
+                        <i data-lucide="save" class="w-4 h-4"></i> 저장
+                    </button>
+                    <button id="reservation-detail-cancel" ${cancellable ? '' : 'disabled'} class="px-4 py-2.5 rounded-lg text-sm font-bold bg-white border border-red-200 text-red-600 hover:bg-red-50 disabled:border-slate-200 disabled:text-slate-300 transition-colors flex items-center gap-1.5">
+                        <i data-lucide="trash-2" class="w-4 h-4"></i> 취소
+                    </button>
+                </div>
+                <div class="px-5 pb-5">
+                    <div class="flex items-center gap-2 mb-3">
+                        <i data-lucide="message-circle" class="w-3.5 h-3.5 text-slate-400"></i>
+                        <span class="text-xs font-bold text-slate-600">댓글</span>
+                        <span class="text-[10px] text-slate-400 ml-auto">${(res.comments || []).length}개</span>
+                    </div>
+                    <div id="detail-comments-list" class="space-y-2 mb-3 max-h-52 overflow-y-auto">
+                        ${(res.comments || []).length === 0
+                            ? `<p class="text-xs text-slate-400 text-center py-3">아직 댓글이 없습니다.</p>`
+                            : (res.comments || []).map(c => `
+                                <div class="bg-white border border-slate-100 rounded-xl px-3 py-2.5 shadow-sm">
+                                    <div class="flex items-center gap-1.5 mb-1">
+                                        <span class="w-5 h-5 rounded-full bg-teal-100 text-teal-700 text-[9px] font-bold flex items-center justify-center shrink-0">${esc((c.author||'?')[0])}</span>
+                                        <span class="text-[11px] font-bold text-slate-700">${esc(c.author || '알 수 없음')}</span>
+                                        <span class="text-[9px] text-slate-400 ml-auto">${formatTime(c.createdAt)}</span>
+                                    </div>
+                                    <p class="text-xs text-slate-700 whitespace-pre-wrap leading-relaxed pl-6">${renderTagged(esc(c.text || ''))}</p>
+                                </div>`
+                            ).join('')}
+                    </div>
+                    ${currentUser ? `
+                    <div class="flex gap-2 items-end">
+                        <div class="relative flex-1">
+                            <textarea id="detail-comment-input" rows="2" placeholder="댓글 입력... (@로 태그)" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400 resize-none"></textarea>
+                        </div>
+                        <button id="detail-comment-submit" class="px-3 py-2 bg-teal-600 text-white text-xs font-bold rounded-xl hover:bg-teal-700 transition-colors shrink-0 flex items-center gap-1">
+                            <i data-lucide="send" class="w-3.5 h-3.5"></i>
+                        </button>
+                    </div>` : ''}
+                </div>
+            `;
+            document.getElementById('reservation-detail-close')?.addEventListener('click', closeReservationDetails);
+            document.getElementById('reservation-detail-save')?.addEventListener('click', updateReservationDetails);
+            document.getElementById('reservation-detail-cancel')?.addEventListener('click', () => cancelReservation(hour, room));
+            document.getElementById('detail-team')?.addEventListener('change', e => {
+                document.getElementById('detail-team-custom-wrap')?.classList.toggle('hidden', e.target.value !== 'external');
+            });
+            // 색상 피커 ↔ hex 입력 동기화
+            document.getElementById('detail-sheet-color-picker')?.addEventListener('input', e => {
+                const hex = document.getElementById('detail-sheet-color-hex');
+                if (hex) hex.value = e.target.value;
+            });
+            document.getElementById('detail-sheet-color-hex')?.addEventListener('input', e => {
+                const v = e.target.value.trim();
+                if (isValidHexColor(v)) {
+                    const picker = document.getElementById('detail-sheet-color-picker');
+                    if (picker) picker.value = v;
+                }
+            });
+            document.getElementById('detail-sheet-color-clear')?.addEventListener('click', () => {
+                const hex = document.getElementById('detail-sheet-color-hex');
+                const picker = document.getElementById('detail-sheet-color-picker');
+                if (hex) hex.value = '';
+                if (picker) picker.value = '#ffffff';
+            });
+            // 댓글 등록
+            const commentInput = document.getElementById('detail-comment-input');
+            document.getElementById('detail-comment-submit')?.addEventListener('click', async () => {
+                const text = commentInput?.value || '';
+                if (!text.trim()) return;
+                const btn = document.getElementById('detail-comment-submit');
+                btn.disabled = true;
+                try {
+                    await addComment(key, text);
+                    commentInput.value = '';
+                } catch(e) { showToast('댓글 등록 실패: ' + e.message, 'error'); }
+                finally { btn.disabled = false; }
+            });
+            commentInput?.addEventListener('keydown', e => {
+                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); document.getElementById('detail-comment-submit')?.click(); }
+            });
+            // 태그 기능 연결 (담당자는 이름 자동완성, 메모/댓글은 @멘션)
+            setupPersonTagInput(document.getElementById('detail-user-name'));
+            setupTagInput(document.getElementById('detail-note'));
+            setupTagInput(document.getElementById('detail-comment-input'));
+            lucide.createIcons();
         }
 
         function renderTable() {
+            renderTableHeader();
             const body = document.getElementById('schedule-body');
             if (!body) return;
             body.innerHTML = '';
+
+            // 연속 동일 팀 예약 셀 병합 사전 계산
+            const cellSpan = {}; // key -> { rowspan: N } 또는 { skip: true }
+            ALL_ROOMS.forEach(room => {
+                let i = 0;
+                while (i < HOURS.length) {
+                    const hour = HOURS[i];
+                    const key = `${hour}-${room}`.replace(/\//g, '_');
+                    const res = reservations[key];
+                    if (res) {
+                        let count = 1;
+                        while (i + count < HOURS.length) {
+                            const nk = `${HOURS[i + count]}-${room}`.replace(/\//g, '_');
+                            const nr = reservations[nk];
+                            if (nr && nr.teamId === res.teamId && nr.teamName === res.teamName && nr.isFixed === res.isFixed) count++;
+                            else break;
+                        }
+                        if (count > 1) {
+                            cellSpan[key] = { rowspan: count };
+                            for (let j = 1; j < count; j++) {
+                                cellSpan[`${HOURS[i + j]}-${room}`.replace(/\//g, '_')] = { skip: true };
+                            }
+                        }
+                        i += count;
+                    } else { i++; }
+                }
+            });
+
             HOURS.forEach(hour => {
                 const tr = document.createElement('tr');
                 tr.className = 'hover:bg-slate-50/30 transition-colors border-b border-slate-100';
@@ -663,46 +1959,61 @@
                 ALL_ROOMS.forEach(room => {
                     const floor = FLOORS.find(f => f.rooms.includes(room));
                     const isLast = floor && floor.rooms[floor.rooms.length - 1] === room;
-                    const td = document.createElement('td');
-                    td.className = `p-1 ${isLast ? 'border-r-2 border-slate-300' : 'border-r border-slate-100'} relative min-w-[90px]`;
                     const key = `${hour}-${room}`.replace(/\//g, '_');
+                    const span = cellSpan[key];
+                    if (span?.skip) return; // 병합된 셀은 건너뜀
+
+                    const td = document.createElement('td');
+                    td.className = `p-1 ${isLast ? 'border-r-2 border-slate-300' : 'border-r border-slate-100'} relative min-w-[110px]`;
+                    if (span?.rowspan > 1) {
+                        td.rowSpan = span.rowspan;
+                        td.style.verticalAlign = 'top';
+                    }
                     const res = reservations[key];
                     if (res) {
                         const team = getTeam(res.teamId);
-                        const canCancel = currentUser && (isAdmin() || (currentUser.allowedTeams || []).includes(res.teamId)) && (!res.isFixed || isAdmin());
-                        
-                        let displayName = res.teamName;
-                        if (team && team.shortName) {
-                            displayName = team.shortName;
-                        } else if (!team) {
-                            if (displayName.length > 5) {
-                                displayName = displayName.slice(0, 4) + '..';
-                            }
+                        let displayName = res.lessonName || res.teamName;
+                        if (!res.lessonName) {
+                            if (team && team.shortName) displayName = team.shortName;
                         }
-
-                        let cardClass = '';
-                        if (team) {
-                            cardClass = `${team.bg} ${team.text} ${team.border}`;
-                        } else {
-                            cardClass = 'bg-slate-50 text-slate-500 border-slate-200';
-                        }
-
-                        const titleAttr = `${res.teamName}${res.isFixed ? ' [고정]' : ''}\n분류: ${team ? (team.fullType || '활동단') : '기타(정규 시간표)'}\n예약자: ${res.userName || ''}${res.note ? `\n메모: ${res.note}` : ''}`;
-                        
-                        td.innerHTML = `<div class="w-full min-h-[46px] flex flex-col justify-center items-center px-0.5 py-1 rounded-lg border-2 shadow-sm relative group ${cardClass} ${res.isFixed ? 'ring-1 ring-current/20 shadow-md' : ''}" title="${esc(titleAttr)}">
+                        const cardVisual = getReservationCardStyle(res, team);
+                        const mergeCount = span?.rowspan || 1;
+                        const minH = `min-height:${mergeCount > 1 ? mergeCount * 54 - 4 : 46}px;`;
+                        const titleAttr = `${res.teamName}${res.isFixed ? ' [고정]' : ''}\n분류: ${team ? (team.fullType || '활동단') : '기타(정규 시간표)'}\n예약자: ${res.userName || ''}${res.note ? `\n메모: ${res.note}` : ''}${res.sheetColor ? `\n시트색: ${res.sheetColor}` : ''}`;
+                        td.innerHTML = `<button type="button" onclick="openReservationDetails('${hour}','${room}')" class="w-full flex flex-col justify-center items-center px-0.5 py-1 rounded-lg border-2 shadow-sm relative group text-left transition-all hover:shadow-md hover:-translate-y-0.5 ${cardVisual.className} ${res.isFixed ? 'ring-1 ring-current/20 shadow-md' : ''}" style="${cardVisual.style}${minH}" title="${esc(titleAttr)}">
                             <span class="absolute top-0.5 right-0.5 text-[9px] flex items-center gap-0.5 leading-none">
                                 ${res.isFixed ? '🔒' : ''}
                                 ${res.note ? '<i data-lucide="message-square" class="w-2.5 h-2.5 opacity-60"></i>' : ''}
                             </span>
-                            <span class="text-[9px] font-bold text-center w-full break-all leading-tight px-0.5">${esc(displayName)}</span>
-                            <span class="text-[8px] opacity-50 mt-0.5 break-all w-full text-center px-0.5 leading-tight">${esc(res.userName || '')}</span>
-                            ${canCancel ? `<button onclick="handleCancelClick('${hour}','${room}')" class="absolute inset-0 w-full h-full rounded-lg opacity-0 group-hover:opacity-100 bg-black/15 flex items-center justify-center transition-all" title="예약 취소"><i data-lucide="x-circle" class="w-5 h-5 text-white drop-shadow"></i></button>` : ''}
-                        </div>`;
+                            <span class="text-[10px] font-bold text-center w-full break-words leading-tight px-0.5">${esc(displayName)}</span>
+                            <span class="text-[9px] opacity-60 mt-0.5 break-words w-full text-center px-0.5 leading-tight">${esc(res.userName || '')}</span>
+                            ${mergeCount > 1 ? `<span class="text-[8px] opacity-40 mt-0.5">${hour} ~ ${HOURS[HOURS.indexOf(hour) + mergeCount] || ''}</span>` : ''}
+                            <span class="absolute bottom-0.5 right-1 opacity-0 group-hover:opacity-80 transition-opacity"><i data-lucide="settings-2" class="w-3 h-3"></i></span>
+                        </button>`;
                     } else {
-                        const canBook = currentUser && selectedTeamId;
-                        td.innerHTML = `<div onclick="${canBook ? `handleBookClick('${hour}','${room}')` : ''}" class="w-full min-h-[46px] flex items-center justify-center rounded-lg border border-dashed ${canBook ? 'border-slate-200 hover:border-teal-400 hover:bg-teal-50 cursor-pointer' : 'border-slate-100'} transition-all group">
-                            ${canBook ? `<span class="text-[9px] text-slate-300 group-hover:text-teal-500 flex items-center gap-0.5 font-semibold"><i data-lucide="plus" class="w-3 h-3"></i> 예약</span>` : ''}
-                        </div>`;
+                        const block = getRoomBlock(hour, room);
+                        if (block) {
+                            const isCustomBlock = block.allowedTeamId === '__custom__';
+                            const blockTeam = isCustomBlock ? null : getTeam(block.allowedTeamId);
+                            const userCanBook = currentUser && (isAdmin() || (
+                                isCustomBlock
+                                    ? (block.allowedUserIds || []).includes(currentUser.id)
+                                    : ((currentUser.allowedTeams || []).includes(block.allowedTeamId) && selectedTeamId === block.allowedTeamId)
+                            ));
+                            const bgCls = blockTeam ? `${blockTeam.bg} ${blockTeam.border}` : 'bg-orange-50 border-orange-200';
+                            const txtCls = blockTeam ? blockTeam.text : 'text-orange-700';
+                            const blockLabel = isCustomBlock ? '기타 전용' : (blockTeam?.name || block.allowedTeamId);
+                            td.innerHTML = `<div onclick="${userCanBook ? `handleBookClick('${hour}','${room}')` : ''}" class="w-full min-h-[46px] flex flex-col items-center justify-center rounded-lg border-2 ${bgCls} ${userCanBook ? 'cursor-pointer hover:opacity-80' : 'cursor-not-allowed opacity-60'} transition-all">
+                                <span class="text-[9px] font-bold ${txtCls} flex items-center gap-0.5"><i data-lucide="lock" class="w-2.5 h-2.5"></i> 전용</span>
+                                <span class="text-[8px] ${txtCls} opacity-70">${esc(blockLabel)}</span>
+                                ${userCanBook ? `<span class="text-[8px] ${txtCls} opacity-50 mt-0.5">클릭하여 예약</span>` : ''}
+                            </div>`;
+                        } else {
+                            const canBook = currentUser && selectedTeamId;
+                            td.innerHTML = `<div onclick="${canBook ? `handleBookClick('${hour}','${room}')` : ''}" class="w-full min-h-[46px] flex items-center justify-center rounded-lg border border-dashed ${canBook ? 'border-slate-200 hover:border-teal-400 hover:bg-teal-50 cursor-pointer' : 'border-slate-100'} transition-all group">
+                                ${canBook ? `<span class="text-[9px] text-slate-300 group-hover:text-teal-500 flex items-center gap-0.5 font-semibold"><i data-lucide="plus" class="w-3 h-3"></i> 예약</span>` : ''}
+                            </div>`;
+                        }
                     }
                     tr.appendChild(td);
                 });
@@ -736,7 +2047,7 @@
                 c.innerHTML = `<div class="text-center py-6 text-slate-400"><i data-lucide="activity" class="w-6 h-6 mx-auto mb-2 opacity-30"></i><p class="text-xs">기록이 없습니다</p></div>`;
                 lucide.createIcons(); return;
             }
-            const colors = { '예약_생성': 'bg-emerald-50 text-emerald-700', '예약_취소': 'bg-slate-50 text-slate-600', '예약_강제취소': 'bg-red-50 text-red-600', '고정일정_추가': 'bg-blue-50 text-blue-700', '고정일정_삭제': 'bg-orange-50 text-orange-700', '주간리셋': 'bg-purple-50 text-purple-700' };
+            const colors = { '예약_생성': 'bg-emerald-50 text-emerald-700', '예약_수정': 'bg-teal-50 text-teal-700', '예약_취소': 'bg-slate-50 text-slate-600', '예약_강제취소': 'bg-red-50 text-red-600', '고정일정_추가': 'bg-blue-50 text-blue-700', '고정일정_삭제': 'bg-orange-50 text-orange-700', '주간리셋': 'bg-purple-50 text-purple-700' };
             c.innerHTML = logs.slice(0, 20).map(log => {
                 const col = colors[log.action] || 'bg-slate-50 text-slate-600';
                 let time = '-';
@@ -760,8 +2071,55 @@
         }
 
         // ==================== EVENT HANDLERS ====================
-        window.handleBookClick = (h, r) => makeReservation(h, r);
+        function showBookingTypeModal(hour, room) {
+            return new Promise(resolve => {
+                const overlay = document.createElement('div');
+                overlay.className = 'fixed inset-0 z-[99] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm';
+                overlay.innerHTML = `
+                    <div class="bg-white rounded-2xl shadow-2xl p-5 w-full max-w-xs border border-slate-200">
+                        <p class="text-sm font-bold text-slate-800 mb-0.5">예약 방식 선택</p>
+                        <p class="text-xs text-slate-400 mb-4">${esc(hour)} · ${esc(room)}</p>
+                        <div class="flex flex-col gap-2">
+                            <button id="_bct-single" class="py-3 rounded-xl text-sm font-bold bg-teal-600 text-white hover:bg-teal-700 transition-colors">단일 예약</button>
+                            <button id="_bct-range" class="py-3 rounded-xl text-sm font-bold bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors flex items-center justify-center gap-2">범위 예약 <span class="text-[10px] font-normal text-slate-400">여러 시간대</span></button>
+                            <button id="_bct-cancel" class="py-2 rounded-xl text-xs text-slate-400 hover:text-slate-600 transition-colors">취소</button>
+                        </div>
+                    </div>`;
+                document.body.appendChild(overlay);
+                const cleanup = () => document.body.removeChild(overlay);
+                overlay.querySelector('#_bct-single').onclick = () => { cleanup(); resolve('single'); };
+                overlay.querySelector('#_bct-range').onclick = () => { cleanup(); resolve('range'); };
+                overlay.querySelector('#_bct-cancel').onclick = () => { cleanup(); resolve(null); };
+                overlay.onclick = e => { if (e.target === overlay) { cleanup(); resolve(null); } };
+            });
+        }
+
+        window.handleBookClick = async (h, r) => {
+            if (!currentUser) { showToast('로그인이 필요합니다.', 'error'); return; }
+            if (!selectedTeamId) { showToast('활동단을 선택해주세요.', 'error'); return; }
+            const block = getRoomBlock(h, r);
+            if (block && !isAdmin()) {
+                const isCustomBlock = block.allowedTeamId === '__custom__';
+                const allowed = isCustomBlock
+                    ? (block.allowedUserIds || []).includes(currentUser.id)
+                    : ((currentUser.allowedTeams || []).includes(block.allowedTeamId) && selectedTeamId === block.allowedTeamId);
+                if (!allowed) {
+                    if (isCustomBlock) {
+                        showToast('이 시간대는 지정된 사용자만 예약할 수 있습니다.', 'error');
+                    } else {
+                        const t = getTeam(block.allowedTeamId);
+                        showToast(`이 시간대는 ${t?.name || '특정 활동단'} 전용입니다.`, 'error');
+                    }
+                    return;
+                }
+            }
+            const type = await showBookingTypeModal(h, r);
+            if (type === 'single') await makeReservation(h, r);
+            else if (type === 'range') await showRangeReserveModal(h, r);
+        };
         window.handleCancelClick = (h, r) => cancelReservation(h, r);
+        window.openReservationDetails = (h, r) => openReservationDetails(h, r);
+        window.closeReservationDetails = () => closeReservationDetails();
 
         window.setLogFilter = function(filter) {
             logFilter = filter;
@@ -784,6 +2142,18 @@
         }
 
         // ==================== AUTH UI ====================
+        function authErrMsg(err) {
+            const map = {
+                'auth/invalid-credential': '아이디 또는 비밀번호가 올바르지 않습니다.',
+                'auth/wrong-password': '아이디 또는 비밀번호가 올바르지 않습니다.',
+                'auth/user-not-found': '아이디 또는 비밀번호가 올바르지 않습니다.',
+                'auth/too-many-requests': '로그인 시도가 너무 많아 일시적으로 잠겼습니다. 잠시 후 다시 시도해주세요.',
+                'auth/network-request-failed': '네트워크 오류가 발생했습니다. 인터넷 연결을 확인해주세요.',
+                'auth/user-disabled': '비활성화된 계정입니다. 관리자에게 문의하세요.',
+            };
+            return map[err.code] || err.message;
+        }
+
         async function handleLoginSubmit(e) {
             e.preventDefault();
             const username = document.getElementById('login-username').value.trim();
@@ -798,7 +2168,7 @@
                 const user = await loginUser(username, password);
                 showToast(`환영합니다, ${user.displayName}님!`, 'success');
             } catch (err) {
-                errEl.textContent = err.message; errEl.classList.remove('hidden');
+                errEl.textContent = authErrMsg(err); errEl.classList.remove('hidden');
             } finally {
                 btn.disabled = false;
                 btn.innerHTML = `<span class="flex items-center gap-2 justify-center"><i data-lucide="log-in" class="w-4 h-4"></i> 로그인</span>`;
@@ -814,23 +2184,141 @@
                 const name = currentUser.displayName || currentUser.username || '사용자';
                 const firstChar = name ? name[0] : '👤';
                 el.innerHTML = `<div class="flex items-center gap-1.5 sm:gap-2">
+                    <span id="online-count-badge" class="${onlineCount===0?'hidden':''} text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full hidden sm:inline-flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse inline-block"></span>${onlineCount}명 접속 중</span>
                     <div class="hidden sm:flex items-center gap-1.5 ${isAdmin() ? 'bg-amber-50 border-amber-200 text-amber-700' : 'bg-teal-50 border-teal-100 text-teal-700'} px-2.5 py-1.5 rounded-xl border text-xs font-bold">
+                        ${currentUser.photoUrl ? `<img src="${esc(currentUser.photoUrl)}" class="w-5 h-5 rounded-full object-cover shrink-0">` : ''}
                         <span>${roleLabel} ${esc(name)}</span>
                         ${isAdmin() ? `<a href="admin.html" class="text-xs text-amber-600 hover:text-amber-800 font-semibold border-l border-amber-200 pl-2 transition-colors">관리</a>` : ''}
                     </div>
                     <!-- Mobile Avatar -->
-                    <div class="sm:hidden bg-gradient-to-br ${isAdmin() ? 'from-amber-400 to-amber-600' : 'from-teal-400 to-teal-600'} text-white rounded-full w-8 h-8 flex items-center justify-center text-xs font-bold border border-white shadow-sm" title="${esc(name)}">
-                        ${esc(firstChar)}
-                    </div>
+                    ${currentUser.photoUrl
+                        ? `<img src="${esc(currentUser.photoUrl)}" class="sm:hidden w-8 h-8 rounded-full object-cover border border-white shadow-sm" title="${esc(name)}">`
+                        : `<div class="sm:hidden bg-gradient-to-br ${isAdmin() ? 'from-amber-400 to-amber-600' : 'from-teal-400 to-teal-600'} text-white rounded-full w-8 h-8 flex items-center justify-center text-xs font-bold border border-white shadow-sm" title="${esc(name)}">${esc(firstChar)}</div>`
+                    }
                     ${isAdmin() ? `<a href="admin.html" class="sm:hidden text-slate-400 hover:text-amber-600 transition-colors p-1.5 rounded-lg hover:bg-amber-50" title="관리자 페이지"><i data-lucide="settings" class="w-4 h-4"></i></a>` : ''}
+                    <div class="relative">
+                        <button id="notif-btn" class="text-slate-400 hover:text-teal-600 transition-colors p-1.5 rounded-lg hover:bg-teal-50" title="알림"><i data-lucide="bell" class="w-4 h-4"></i></button>
+                        <span id="notif-badge" class="${unreadNotifCount===0?'hidden':''} absolute -top-0.5 -right-0.5 min-w-[14px] h-3.5 rounded-full bg-red-500 text-white text-[8px] font-bold flex items-center justify-center px-0.5">${unreadNotifCount>9?'9+':unreadNotifCount}</span>
+                    </div>
+                    <button id="chpw-btn" class="text-slate-400 hover:text-slate-700 transition-colors p-1.5 rounded-lg hover:bg-slate-100" title="비밀번호 변경"><i data-lucide="key-round" class="w-4 h-4"></i></button>
                     <button id="logout-btn" class="text-slate-400 hover:text-red-500 transition-colors p-1.5 rounded-lg hover:bg-red-50" title="로그아웃"><i data-lucide="log-out" class="w-4 h-4"></i></button>
                 </div>`;
-                document.getElementById('logout-btn').addEventListener('click', doLogout);
+                document.getElementById('chpw-btn')?.addEventListener('click', () => { document.getElementById('chpw-form')?.reset(); document.getElementById('chpw-error')?.classList.add('hidden'); showModal('change-pw-modal'); });
+                document.getElementById('logout-btn').addEventListener('click', () => {
+                    showConfirm('정말 로그아웃 하시겠습니까?', { title: '로그아웃', okText: '로그아웃', danger: false }).then(ok => { if (ok) doLogout(); });
+                });
+                document.getElementById('notif-btn')?.addEventListener('click', e => { e.stopPropagation(); toggleNotifPanel(); });
             } else {
                 el.innerHTML = `<button id="login-btn-h" class="flex items-center gap-1.5 text-xs font-semibold text-teal-700 bg-teal-50 hover:bg-teal-100 border border-teal-200 px-3 py-1.5 rounded-lg transition-all"><i data-lucide="log-in" class="w-3.5 h-3.5"></i> 로그인</button>`;
                 document.getElementById('login-btn-h').addEventListener('click', () => showModal('login-modal'));
             }
             lucide.createIcons();
+        }
+
+        // ==================== LEFT NAV SIDEBAR ====================
+        let leftNavMonth = new Date();
+
+        function getWeekDateRange(weekId) {
+            const [year, wStr] = weekId.split('-W');
+            const y = parseInt(year), w = parseInt(wStr);
+            const jan4 = new Date(y, 0, 4);
+            const startOfW1Mon = new Date(jan4);
+            startOfW1Mon.setDate(jan4.getDate() - (jan4.getDay() + 6) % 7);
+            const start = new Date(startOfW1Mon);
+            start.setDate(startOfW1Mon.getDate() + (w - 1) * 7);
+            const end = new Date(start);
+            end.setDate(start.getDate() + 6);
+            return { start, end };
+        }
+
+        function getWeeksInMonth(year, month) {
+            const weeks = [];
+            const seen = new Set();
+            const d = new Date(year, month, 1);
+            while (d.getMonth() === month) {
+                const wid = getWeekId(new Date(d));
+                if (!seen.has(wid)) { seen.add(wid); weeks.push(wid); }
+                d.setDate(d.getDate() + 1);
+            }
+            return weeks;
+        }
+
+        function renderLeftNav() {
+            const year = leftNavMonth.getFullYear();
+            const month = leftNavMonth.getMonth();
+
+            const monthLabel = document.getElementById('left-nav-month-label');
+            if (monthLabel) monthLabel.textContent = `${year}년 ${month + 1}월`;
+
+            const grid = document.getElementById('left-nav-calendar-grid');
+            if (grid) {
+                const firstDay = new Date(year, month, 1);
+                const lastDay = new Date(year, month + 1, 0);
+                const startDow = firstDay.getDay();
+                let html = '';
+                for (let i = 0; i < startDow; i++) html += `<div></div>`;
+                const today = new Date(); today.setHours(0,0,0,0);
+                for (let d = 1; d <= lastDay.getDate(); d++) {
+                    const date = new Date(year, month, d);
+                    const wid = getWeekId(date);
+                    const isToday = date.getTime() === today.getTime();
+                    const isCurrent = wid === currentWeekId;
+                    html += `<button onclick="navigateToWeek('${wid}')" class="text-[10px] py-0.5 rounded transition-colors ${isToday ? 'bg-teal-500 text-white font-bold' : isCurrent ? 'bg-teal-100 text-teal-700 font-bold' : 'hover:bg-slate-100 text-slate-600'}">${d}</button>`;
+                }
+                grid.innerHTML = html;
+            }
+
+            const weekList = document.getElementById('left-nav-week-list');
+            if (weekList) {
+                const weeks = getWeeksInMonth(year, month);
+                weekList.innerHTML = weeks.map(wid => {
+                    const { start, end } = getWeekDateRange(wid);
+                    const fmt = d => `${d.getMonth()+1}/${d.getDate()}`;
+                    const isCurrent = wid === currentWeekId;
+                    const wNum = wid.split('-W')[1];
+                    return `<button onclick="navigateToWeek('${wid}')" class="w-full text-left px-2.5 py-1.5 rounded-lg text-xs transition-colors ${isCurrent ? 'bg-teal-500 text-white font-bold' : 'hover:bg-slate-100 text-slate-700'}">
+                        <div class="font-bold">${parseInt(wNum)}주차</div>
+                        <div class="text-[10px] ${isCurrent ? 'text-teal-100' : 'text-slate-400'}">${fmt(start)} ~ ${fmt(end)}</div>
+                    </button>`;
+                }).join('');
+            }
+
+            lucide.createIcons();
+        }
+
+        window.navigateToWeek = function(weekId) {
+            currentWeekId = weekId;
+            const weekEl = document.getElementById('week-display');
+            if (weekEl) weekEl.textContent = currentWeekId;
+            const { start } = getWeekDateRange(weekId);
+            leftNavMonth = new Date(start.getFullYear(), start.getMonth(), 1);
+            clearAllSubscriptions();
+            subscribeToReservations();
+            subscribeToFixedSchedules();
+            subscribeToActivityLogs();
+            renderLeftNav();
+        };
+
+        function setupLeftNav() {
+            leftNavMonth = new Date();
+            renderLeftNav();
+
+            document.getElementById('left-nav-prev-month')?.addEventListener('click', () => {
+                leftNavMonth.setMonth(leftNavMonth.getMonth() - 1);
+                renderLeftNav();
+            });
+            document.getElementById('left-nav-next-month')?.addEventListener('click', () => {
+                leftNavMonth.setMonth(leftNavMonth.getMonth() + 1);
+                renderLeftNav();
+            });
+
+            document.getElementById('btn-left-nav-toggle')?.addEventListener('click', () => {
+                const sidebar = document.getElementById('left-nav-sidebar');
+                if (!sidebar) return;
+                const isHidden = sidebar.classList.contains('hidden');
+                sidebar.classList.toggle('hidden', !isHidden);
+                sidebar.classList.toggle('flex', isHidden);
+            });
         }
 
         // ==================== SIDE TABS ====================
@@ -889,14 +2377,64 @@
             renderTeamSelectors();
             renderAdminSection();
             setupSideTabs();
+            setupLeftNav();
             setupFixedForm();
 
             // Event listeners
             document.getElementById('login-form')?.addEventListener('submit', handleLoginSubmit);
             document.getElementById('close-login-modal')?.addEventListener('click', () => { if (currentUser) hideModal('login-modal'); });
+            document.getElementById('register-form')?.addEventListener('submit', handleRegister);
+            // 보안 질문 옵션 채우기
+            const secQEl = document.getElementById('reg-sec-q');
+            if (secQEl) SECURITY_QUESTIONS.forEach(q => secQEl.appendChild(new Option(q, q)));
+            // 모듈 함수 전역 노출 (HTML inline onsubmit/onclick 사용)
+            window.hideModal = hideModal;
+            window.showModal = showModal;
+            window.switchLoginTab = switchLoginTab;
+            window.handleRecovery1 = handleRecovery1;
+            window.handleRecovery2 = handleRecovery2;
+            window.handleRecovery3 = handleRecovery3;
+            window.handlePasswordChange = handlePasswordChange;
+            window.toggleNotifPanel = toggleNotifPanel;
+            window.markAllNotifsRead = markAllNotifsRead;
+
+            document.addEventListener('click', e => {
+                const panel = document.getElementById('notif-panel');
+                if (panel && !panel.classList.contains('hidden') && !panel.contains(e.target) && e.target.id !== 'notif-btn') {
+                    panel.classList.add('hidden');
+                }
+            });
+
             document.getElementById('btn-export')?.addEventListener('click', exportCurrentExcel);
             document.getElementById('btn-reset')?.addEventListener('click', weeklyReset);
             document.getElementById('btn-add-fixed')?.addEventListener('click', () => showModal('fixed-schedule-modal'));
+            document.getElementById('btn-room-block')?.addEventListener('click', () => initRoomBlockModal());
+            document.getElementById('rb-submit')?.addEventListener('click', async () => {
+                const day = document.getElementById('rb-day')?.value;
+                const room = document.getElementById('rb-room')?.value;
+                const startHour = document.getElementById('rb-start')?.value;
+                const endHour = document.getElementById('rb-end')?.value;
+                const allowedTeamId = document.getElementById('rb-team')?.value;
+                const note = document.getElementById('rb-note')?.value.trim() || '';
+                if (!day || !room || !startHour || !endHour || !allowedTeamId) { showToast('모든 항목을 선택하세요.', 'error'); return; }
+                if (parseInt(startHour) >= parseInt(endHour)) { showToast('종료 시간이 시작 시간보다 늦어야 합니다.', 'error'); return; }
+                if (allowedTeamId === '__custom__' && !rbSelectedUsers.length) { showToast('허용할 사용자를 한 명 이상 추가하세요.', 'error'); return; }
+                const btn = document.getElementById('rb-submit');
+                btn.disabled = true;
+                try {
+                    const payload = { day, room, startHour, endHour, allowedTeamId, note, createdAt: serverTimestamp(), createdBy: currentUser.id };
+                    if (allowedTeamId === '__custom__') {
+                        payload.allowedUserIds = rbSelectedUsers.map(u => u.id);
+                        payload.allowedUserNames = rbSelectedUsers.map(u => u.displayName);
+                    }
+                    await addDoc(collection(db, 'room_blocks'), payload);
+                    showToast('전용 시간이 설정되었습니다.', 'success');
+                    document.getElementById('rb-note').value = '';
+                    rbSelectedUsers = [];
+                    renderRbUserChips();
+                } catch(e) { showToast('설정 실패: ' + e.message, 'error'); }
+                finally { btn.disabled = false; }
+            });
             document.getElementById('close-fixed-modal')?.addEventListener('click', () => hideModal('fixed-schedule-modal'));
             document.getElementById('btn-archive')?.addEventListener('click', openArchiveViewer);
             document.getElementById('close-archive-modal')?.addEventListener('click', () => hideModal('archive-modal'));
@@ -931,7 +2469,8 @@
                                 username: userData.username,
                                 displayName: userData.displayName,
                                 role: userData.role,
-                                allowedTeams: userData.allowedTeams || []
+                                allowedTeams: userData.allowedTeams || [],
+                                photoUrl: userData.photoUrl || null
                             };
                             
                             if (!isAdmin() && (currentUser.allowedTeams || []).length > 0) {
@@ -944,7 +2483,17 @@
                             updateHeader();
                             renderTeamSelectors();
                             renderAdminSection();
-                            
+                            renderMobileTeamSelectors(); updateMobileBottomBar();
+
+                            // 태그 기능용 사용자 목록 로드
+                            getDocs(collection(db, 'users')).then(snap => {
+                                USERS_CACHE = [];
+                                snap.forEach(d => USERS_CACHE.push({ id: d.id, ...d.data() }));
+                            }).catch(() => {});
+
+                            // OneSignal 초기화 (로그인 후)
+                            initOneSignal();
+
                             // 로그인된 상태에서만 데이터를 구독하고 테이블을 그립니다.
                             try {
                                 await initData();
@@ -975,11 +2524,176 @@
                     renderTeamSelectors();
                     renderAdminSection();
                     renderTable();
+                    renderMobileTeamSelectors(); updateMobileBottomBar();
                     setTimeout(() => showModal('login-modal'), 400);
                 }
             });
 
+            initMobileAdmin();
             lucide.createIcons();
+        }
+
+        // 기타 전용: 선택된 사용자 목록
+        let rbSelectedUsers = []; // { id, displayName, username }
+
+        function initRoomBlockModal() {
+            rbSelectedUsers = [];
+
+            // 공간 선택지
+            const roomSel = document.getElementById('rb-room');
+            if (roomSel && roomSel.options.length === 0) {
+                ALL_ROOMS.forEach(r => roomSel.appendChild(new Option(r, r)));
+            }
+            // 시간 선택지
+            const startSel = document.getElementById('rb-start');
+            const endSel = document.getElementById('rb-end');
+            if (startSel && startSel.options.length === 0) {
+                HOURS.forEach(h => startSel.appendChild(new Option(h, h)));
+            }
+            if (endSel && endSel.options.length === 0) {
+                for (let h = 10; h <= 22; h++) {
+                    const hStr = `${String(h).padStart(2,'0')}:00`;
+                    endSel.appendChild(new Option(hStr, hStr));
+                }
+                endSel.value = '22:00';
+            }
+            // 활동단 선택지 (기타 옵션 포함)
+            const teamSel = document.getElementById('rb-team');
+            teamSel.innerHTML = '<option value="__custom__">기타 (특정 사용자 지정)</option>';
+            TEAMS.forEach(t => teamSel.appendChild(new Option(t.name, t.id)));
+            teamSel.value = TEAMS[0]?.id || '__custom__';
+
+            // 기타 선택 시 사용자 영역 토글
+            const customWrap = document.getElementById('rb-custom-users-wrap');
+            const toggleCustom = () => {
+                const isCustom = teamSel.value === '__custom__';
+                customWrap?.classList.toggle('hidden', !isCustom);
+            };
+            teamSel.removeEventListener('change', teamSel._rbToggle);
+            teamSel._rbToggle = toggleCustom;
+            teamSel.addEventListener('change', toggleCustom);
+            toggleCustom();
+
+            // 사용자 검색 드롭다운
+            const searchInput = document.getElementById('rb-user-search');
+            const dropdown = document.getElementById('rb-user-dropdown');
+            if (searchInput) {
+                searchInput.value = '';
+                const onSearch = () => {
+                    const q = searchInput.value.toLowerCase().trim();
+                    if (!q) { dropdown.classList.add('hidden'); return; }
+                    const hits = USERS_CACHE.filter(u =>
+                        !rbSelectedUsers.find(s => s.id === u.id) &&
+                        ((u.displayName || '').toLowerCase().includes(q) || (u.username || '').toLowerCase().includes(q))
+                    ).slice(0, 6);
+                    if (!hits.length) { dropdown.classList.add('hidden'); return; }
+                    dropdown.innerHTML = hits.map(u =>
+                        `<div class="rb-user-opt flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-purple-50" data-id="${esc(u.id)}" data-name="${esc(u.displayName)}" data-un="${esc(u.username)}">
+                            <span class="w-6 h-6 rounded-full bg-purple-100 text-purple-700 text-[10px] font-bold flex items-center justify-center shrink-0">${esc((u.displayName||'?')[0])}</span>
+                            <span class="text-sm font-semibold text-slate-800">${esc(u.displayName)}</span>
+                            <span class="text-xs text-slate-400 ml-auto">@${esc(u.username)}</span>
+                        </div>`
+                    ).join('');
+                    dropdown.classList.remove('hidden');
+                    dropdown.querySelectorAll('.rb-user-opt').forEach(opt => {
+                        opt.addEventListener('mousedown', e => {
+                            e.preventDefault();
+                            rbSelectedUsers.push({ id: opt.dataset.id, displayName: opt.dataset.name, username: opt.dataset.un });
+                            searchInput.value = '';
+                            dropdown.classList.add('hidden');
+                            renderRbUserChips();
+                        });
+                    });
+                };
+                searchInput.removeEventListener('input', searchInput._rbSearch);
+                searchInput._rbSearch = onSearch;
+                searchInput.addEventListener('input', onSearch);
+                searchInput.addEventListener('blur', () => setTimeout(() => dropdown.classList.add('hidden'), 150));
+            }
+
+            // 현재 요일 기본값
+            const daySel = document.getElementById('rb-day');
+            if (daySel) daySel.value = activeDay;
+
+            renderRbUserChips();
+            renderRoomBlockList();
+            showModal('room-block-modal');
+            lucide.createIcons();
+        }
+
+        function renderRbUserChips() {
+            const chips = document.getElementById('rb-user-chips');
+            if (!chips) return;
+            if (!rbSelectedUsers.length) {
+                chips.innerHTML = `<span class="text-[10px] text-purple-400">추가한 사용자가 여기에 표시됩니다</span>`;
+                return;
+            }
+            chips.innerHTML = rbSelectedUsers.map(u =>
+                `<span class="flex items-center gap-1 bg-purple-100 text-purple-800 text-[11px] font-semibold px-2 py-0.5 rounded-full">
+                    ${esc(u.displayName)}
+                    <button type="button" onclick="rbRemoveUser('${esc(u.id)}')" class="ml-0.5 text-purple-400 hover:text-red-500 leading-none">×</button>
+                </span>`
+            ).join('');
+        }
+
+        window.rbRemoveUser = (uid) => {
+            rbSelectedUsers = rbSelectedUsers.filter(u => u.id !== uid);
+            renderRbUserChips();
+        };
+
+        function renderRoomBlockList() {
+            const list = document.getElementById('rb-list');
+            if (!list) return;
+            if (!roomBlocks.length) {
+                list.innerHTML = `<p class="text-xs text-slate-400 text-center py-3">설정된 전용 시간이 없습니다.</p>`;
+                return;
+            }
+            const dayLabel = { mon:'월', tue:'화', wed:'수', thu:'목', fri:'금', sat:'토', sun:'일' };
+            list.innerHTML = roomBlocks.map(b => {
+                const isCustom = b.allowedTeamId === '__custom__';
+                const team = isCustom ? null : getTeam(b.allowedTeamId);
+                let whoLabel;
+                if (isCustom) {
+                    const names = (b.allowedUserIds || []).map(uid => {
+                        const u = USERS_CACHE.find(x => x.id === uid);
+                        return u ? u.displayName : uid;
+                    }).join(', ');
+                    whoLabel = `기타: ${names || '사용자 없음'}`;
+                } else {
+                    whoLabel = (team?.name || b.allowedTeamId) + ' 전용';
+                }
+                return `<div class="flex items-center gap-2 bg-purple-50 border border-purple-100 rounded-lg px-2.5 py-2">
+                    <div class="flex-1 min-w-0">
+                        <p class="text-[11px] font-bold text-purple-800 truncate">${esc(dayLabel[b.day]||b.day)} · ${esc(b.room)} · ${esc(b.startHour)}~${esc(b.endHour)}</p>
+                        <p class="text-[10px] text-purple-600 truncate">${esc(whoLabel)}${b.note ? ` · ${esc(b.note)}` : ''}</p>
+                    </div>
+                    <button onclick="deleteRoomBlock('${esc(b.id)}')" class="p-1 rounded-lg text-red-400 hover:text-red-600 hover:bg-red-50 shrink-0 transition-colors"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button>
+                </div>`;
+            }).join('');
+            lucide.createIcons();
+        }
+
+        window.deleteRoomBlock = async (blockId) => {
+            const ok = await showConfirm('이 전용 시간 설정을 삭제하시겠습니까?', { title: '전용 시간 삭제', okText: '삭제', danger: true });
+            if (!ok) return;
+            try {
+                await deleteDoc(doc(db, 'room_blocks', blockId));
+                showToast('전용 시간이 삭제되었습니다.', 'success');
+            } catch(e) { showToast('삭제 실패: ' + e.message, 'error'); }
+        };
+
+        function initMobileAdmin() {
+            document.getElementById('mobile-btn-add-fixed')?.addEventListener('click', () => {
+                closeMobileDrawer();
+                document.getElementById('btn-add-fixed')?.click();
+            });
+            document.getElementById('mobile-btn-reset')?.addEventListener('click', () => {
+                closeMobileDrawer();
+                weeklyReset();
+            });
+            document.getElementById('mobile-team-change-btn')?.addEventListener('click', () => openMobileDrawer('teams'));
+            document.getElementById('mobile-btn-archive')?.addEventListener('click', () => document.getElementById('btn-archive')?.click());
+            document.getElementById('mobile-btn-export')?.addEventListener('click', () => document.getElementById('btn-export')?.click());
         }
 
         if (document.readyState === 'loading') {
@@ -1052,6 +2766,12 @@
         #toast {
             transition: all 0.3s cubic-bezier(.4, 0, .2, 1);
         }
+
+        @media (max-width: 1023px) {
+            body { padding-bottom: 60px; }
+            #right-side-panel { display: none !important; }
+            #main-content { padding: 0; }
+        }
     </style>
 </head>
 
@@ -1069,7 +2789,7 @@
                     <i data-lucide="calendar-range" class="w-5 h-5"></i>
                 </div>
                 <div>
-                    <h1 class="text-[13px] sm:text-base md:text-lg font-bold text-slate-900 leading-tight">유스나루 활동단 공간 예약</h1>
+                    <h1 class="text-[13px] sm:text-base md:text-lg font-bold text-slate-900 leading-tight">유스나루 예약</h1>
                     <p class="text-[10px] text-slate-400 hidden sm:block">서울시립마포청소년센터 · 실시간 활동실 예약 시스템 v2</p>
                 </div>
             </div>
@@ -1079,12 +2799,12 @@
                     <span class="text-xs font-semibold text-slate-600" id="week-display">-</span>
                 </div>
                 <button id="btn-archive"
-                    class="flex items-center gap-1.5 text-xs font-semibold text-violet-700 bg-violet-50 hover:bg-violet-100 border border-violet-200 px-2.5 py-1.5 rounded-lg transition-all">
+                    class="hidden md:flex items-center gap-1.5 text-xs font-semibold text-violet-700 bg-violet-50 hover:bg-violet-100 border border-violet-200 px-2.5 py-1.5 rounded-lg transition-all">
                     <i data-lucide="history" class="w-3.5 h-3.5"></i>
                     <span class="hidden sm:inline">과거 기록</span>
                 </button>
                 <button id="btn-export"
-                    class="flex items-center gap-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2.5 py-1.5 rounded-lg transition-all">
+                    class="hidden md:flex items-center gap-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2.5 py-1.5 rounded-lg transition-all">
                     <i data-lucide="download" class="w-3.5 h-3.5"></i>
                     <span class="hidden sm:inline">엑셀 저장</span>
                 </button>
@@ -1094,98 +2814,83 @@
     </header>
 
     <!-- Main -->
-    <main class="flex-grow max-w-[1700px] w-full mx-auto p-3 md:p-5 flex flex-col xl:flex-row gap-4">
+    <main class="flex-grow max-w-[1700px] w-full mx-auto p-0 md:p-5 flex flex-col lg:flex-row gap-4 min-h-0">
+
+        <!-- Left Nav Sidebar (collapsible) -->
+        <div id="left-nav-sidebar" class="hidden xl:flex flex-col gap-0 w-56 flex-shrink-0">
+            <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                <!-- Month header -->
+                <div class="bg-slate-50 border-b border-slate-200 px-4 py-3">
+                    <div class="flex items-center justify-between mb-3">
+                        <button id="left-nav-prev-month" class="p-1 hover:bg-slate-200 rounded-lg transition-colors"><i data-lucide="chevron-left" class="w-3.5 h-3.5 text-slate-500"></i></button>
+                        <span id="left-nav-month-label" class="text-xs font-bold text-slate-700"></span>
+                        <button id="left-nav-next-month" class="p-1 hover:bg-slate-200 rounded-lg transition-colors"><i data-lucide="chevron-right" class="w-3.5 h-3.5 text-slate-500"></i></button>
+                    </div>
+                    <!-- Mini calendar grid: Su Mo Tu We Th Fr Sa -->
+                    <div class="grid grid-cols-7 gap-0.5 text-center">
+                        <div class="text-[9px] font-bold text-slate-400 py-0.5">일</div>
+                        <div class="text-[9px] font-bold text-slate-400 py-0.5">월</div>
+                        <div class="text-[9px] font-bold text-slate-400 py-0.5">화</div>
+                        <div class="text-[9px] font-bold text-slate-400 py-0.5">수</div>
+                        <div class="text-[9px] font-bold text-slate-400 py-0.5">목</div>
+                        <div class="text-[9px] font-bold text-slate-400 py-0.5">금</div>
+                        <div class="text-[9px] font-bold text-slate-400 py-0.5">토</div>
+                        <div id="left-nav-calendar-grid" class="contents"></div>
+                    </div>
+                </div>
+                <!-- Week list -->
+                <div class="p-2">
+                    <p class="text-[9px] font-bold text-slate-400 uppercase tracking-wider px-2 py-1.5">주차</p>
+                    <div id="left-nav-week-list" class="flex flex-col gap-0.5 max-h-[320px] overflow-y-auto scrollbar-thin"></div>
+                </div>
+            </div>
+        </div>
 
         <!-- Left: Schedule Grid -->
         <div
-            class="flex-grow bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col min-w-0">
+            class="flex-grow bg-white md:rounded-2xl border-y md:border border-slate-200 md:shadow-sm overflow-hidden flex flex-col min-w-0 min-h-0">
             <!-- Day Tabs -->
-            <div class="bg-slate-100 p-2 border-b border-slate-200">
-                <div id="day-tabs" class="flex gap-1"></div>
+            <div class="bg-slate-100 p-2 border-b border-slate-200 flex items-center gap-2">
+                <div id="day-tabs" class="flex gap-1 flex-1"></div>
+                <button id="btn-left-nav-toggle" class="shrink-0 flex items-center gap-1 text-[11px] font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 border border-slate-200 px-2.5 py-1.5 rounded-lg transition-all xl:hidden">
+                    <i data-lucide="calendar-days" class="w-3.5 h-3.5"></i><span class="hidden sm:inline">달력</span>
+                </button>
+            </div>
+            <!-- Mobile selected team bar (lg+ hidden, shown only when team selected) -->
+            <div id="mobile-team-bar" class="hidden lg:hidden border-b border-slate-100 px-3 py-1.5 bg-white flex items-center gap-2">
+                <span class="text-[10px] text-slate-400 font-medium shrink-0">선택된 활동단</span>
+                <div id="mobile-team-chip" class="flex-1 min-w-0"></div>
+                <button id="mobile-team-change-btn" class="shrink-0 text-[10px] font-bold text-teal-600 bg-teal-50 border border-teal-200 px-2 py-0.5 rounded-lg">변경</button>
             </div>
 
             <!-- Table -->
-            <div class="flex-grow overflow-auto table-scroll">
-                <table class="w-full border-collapse text-left" style="min-width: 900px;">
-                    <thead class="sticky top-0 z-20 bg-white">
-                        <tr class="border-b border-slate-200">
-                            <th
-                                class="py-2 px-3 text-center text-[10px] font-bold text-slate-400 border-r border-slate-200 w-16 bg-slate-50">
-                                시간</th>
-                            <th colspan="2"
-                                class="py-2 px-3 text-center text-[10px] font-bold text-teal-700 border-r-2 border-slate-300 bg-teal-50/80">
-                                🏊 지하 1층</th>
-                            <th colspan="4"
-                                class="py-2 px-3 text-center text-[10px] font-bold text-sky-700 border-r-2 border-slate-300 bg-sky-50/80">
-                                🏢 1층</th>
-                            <th colspan="3"
-                                class="py-2 px-3 text-center text-[10px] font-bold text-indigo-700 border-r-2 border-slate-300 bg-indigo-50/80">
-                                📺 2층</th>
-                            <th colspan="1"
-                                class="py-2 px-3 text-center text-[10px] font-bold text-purple-700 bg-purple-50/80">🏀
-                                3층</th>
-                        </tr>
-                        <tr class="bg-slate-50 border-b-2 border-slate-200 text-center">
-                            <th
-                                class="py-2 px-1 text-[10px] font-bold text-slate-400 border-r border-slate-200 bg-slate-100 w-16">
-                                구분</th>
-                            <th
-                                class="py-2 px-1 text-[10px] font-bold text-slate-600 border-r border-slate-100 bg-teal-50/40 min-w-[90px]">
-                                수영장</th>
-                            <th
-                                class="py-2 px-1 text-[10px] font-bold text-slate-600 border-r-2 border-slate-300 bg-teal-50/40 min-w-[90px]">
-                                소리나루</th>
-                            <th
-                                class="py-2 px-1 text-[10px] font-bold text-slate-600 border-r border-slate-100 bg-sky-50/30 min-w-[90px]">
-                                나루지기실</th>
-                            <th
-                                class="py-2 px-1 text-[10px] font-bold text-slate-600 border-r border-slate-100 bg-sky-50/30 min-w-[90px]">
-                                콤마스튜디오</th>
-                            <th
-                                class="py-2 px-1 text-[10px] font-bold text-slate-600 border-r border-slate-100 bg-sky-50/30 min-w-[90px]">
-                                꿈나루실<br><span class="text-[8px] text-slate-400 font-normal">(멀티미디어)</span></th>
-                            <th
-                                class="py-2 px-1 text-[10px] font-bold text-slate-600 border-r-2 border-slate-300 bg-sky-50/30 min-w-[90px]">
-                                링키실</th>
-                            <th
-                                class="py-2 px-1 text-[10px] font-bold text-slate-600 border-r border-slate-100 bg-indigo-50/30 min-w-[90px]">
-                                방송미디어나루</th>
-                            <th
-                                class="py-2 px-1 text-[10px] font-bold text-slate-600 border-r border-slate-100 bg-indigo-50/30 min-w-[90px]">
-                                스튜디오M</th>
-                            <th
-                                class="py-2 px-1 text-[10px] font-bold text-slate-600 border-r-2 border-slate-300 bg-indigo-50/30 min-w-[90px]">
-                                스튜디오H</th>
-                            <th class="py-2 px-1 text-[10px] font-bold text-slate-600 bg-purple-50/30 min-w-[90px]">체육관
-                            </th>
-                        </tr>
-                    </thead>
+            <div class="flex-grow overflow-auto table-scroll" style="min-height: 0;">
+                <table class="w-full border-collapse text-left" style="min-width: 2660px;">
+                    <thead id="schedule-head" class="sticky top-0 z-20 bg-white"></thead>
                     <tbody id="schedule-body"></tbody>
                 </table>
             </div>
 
             <!-- Bottom Bar -->
             <div
-                class="bg-slate-50 border-t border-slate-200 px-4 py-2 flex items-center justify-between gap-3 flex-wrap">
-                <div class="flex items-center gap-4">
-                    <div class="flex items-center gap-1.5 text-[10px] text-slate-400">
-                        <span
-                            class="inline-block w-3 h-3 rounded border-2 border-dashed border-slate-300"></span><span>예약
-                            가능</span>
+                class="bg-slate-50 border-t border-slate-200 px-3 py-1.5 flex items-center justify-between gap-3">
+                <div class="flex items-center gap-3">
+                    <div class="flex items-center gap-1 text-[9px] text-slate-400">
+                        <span class="inline-block w-2.5 h-2.5 rounded border-2 border-dashed border-slate-300"></span><span>예약 가능</span>
                     </div>
-                    <div class="flex items-center gap-1.5 text-[10px] text-slate-400">
-                        <span class="text-[10px]">🔒</span><span>고정 일정 (관리자)</span>
+                    <div class="flex items-center gap-1 text-[9px] text-slate-400">
+                        <span class="text-[9px]">🔒</span><span class="hidden sm:inline">고정 일정</span>
                     </div>
                 </div>
-                <div class="flex items-center gap-1.5 text-[10px]">
-                    <i data-lucide="zap" class="w-3 h-3 text-teal-500"></i>
+                <div class="flex items-center gap-1 text-[9px]">
+                    <i data-lucide="zap" class="w-2.5 h-2.5 text-teal-500"></i>
                     <span class="text-teal-600 font-semibold">실시간 동기화</span>
                 </div>
             </div>
         </div>
 
-        <!-- Right: Side Panel -->
-        <div class="w-full xl:w-72 2xl:w-80 flex-shrink-0 flex flex-col gap-3">
+        <!-- Right: Side Panel (desktop only) -->
+        <div id="right-side-panel" class="flex flex-col w-full lg:w-72 xl:w-80 flex-shrink-0 gap-3">
 
             <!-- Side Tabs -->
             <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
@@ -1221,6 +2926,10 @@
                         <button id="btn-add-fixed"
                             class="w-full flex items-center gap-2 justify-center py-2 px-3 bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 text-xs font-semibold rounded-xl transition-all">
                             <i data-lucide="pin" class="w-3.5 h-3.5"></i> 고정 일정 추가
+                        </button>
+                        <button id="btn-room-block"
+                            class="w-full flex items-center gap-2 justify-center py-2 px-3 bg-purple-50 hover:bg-purple-100 border border-purple-200 text-purple-700 text-xs font-semibold rounded-xl transition-all">
+                            <i data-lucide="lock" class="w-3.5 h-3.5"></i> 전용 시간 설정
                         </button>
                         <button id="btn-reset"
                             class="w-full flex items-center gap-2 justify-center py-2 px-3 bg-red-50 hover:bg-red-100 border border-red-200 text-red-600 text-xs font-semibold rounded-xl transition-all">
@@ -1265,65 +2974,43 @@
                 </h3>
                 <div class="space-y-1.5 text-[10px]">
                     <div class="flex items-start gap-2"><span
-                            class="w-3 h-3 rounded bg-teal-100 border border-teal-300 flex-shrink-0 mt-0.5"></span>
-                        <div><strong class="text-teal-800">지하 1층</strong><span class="text-slate-500 ml-1">수영장,
-                                소리나루</span></div>
-                    </div>
-                    <div class="flex items-start gap-2"><span
-                            class="w-3 h-3 rounded bg-sky-100 border border-sky-300 flex-shrink-0 mt-0.5"></span>
-                        <div><strong class="text-sky-800">1층</strong><span class="text-slate-500 ml-1">나루지기실, 콤마스튜디오,
-                                꿈나루실, 링키실</span></div>
-                    </div>
-                    <div class="flex items-start gap-2"><span
-                            class="w-3 h-3 rounded bg-indigo-100 border border-indigo-300 flex-shrink-0 mt-0.5"></span>
-                        <div><strong class="text-indigo-800">2층</strong><span class="text-slate-500 ml-1">방송미디어나루,
-                                스튜디오M, 스튜디오H</span></div>
-                    </div>
-                    <div class="flex items-start gap-2"><span
                             class="w-3 h-3 rounded bg-purple-100 border border-purple-300 flex-shrink-0 mt-0.5"></span>
                         <div><strong class="text-purple-800">3층</strong><span class="text-slate-500 ml-1">체육관</span>
                         </div>
                     </div>
+                    <div class="flex items-start gap-2"><span
+                            class="w-3 h-3 rounded bg-teal-100 border border-teal-300 flex-shrink-0 mt-0.5"></span>
+                        <div><strong class="text-teal-800">지하 1층</strong><span class="text-slate-500 ml-1">건강나루, 피아노나루, 소리나루</span></div>
+                    </div>
+                    <div class="flex items-start gap-2"><span
+                            class="w-3 h-3 rounded bg-sky-100 border border-sky-300 flex-shrink-0 mt-0.5"></span>
+                        <div><strong class="text-sky-800">1층 프로그램실</strong><span class="text-slate-500 ml-1">상상나루, 생각나루, 창의나루, 세미나실, 키움나루, 사랑나루, 나루지기, 멀티미디어</span></div>
+                    </div>
+                    <div class="flex items-start gap-2"><span
+                            class="w-3 h-3 rounded bg-cyan-100 border border-cyan-300 flex-shrink-0 mt-0.5"></span>
+                        <div><strong class="text-cyan-800">1층 콤마</strong><span class="text-slate-500 ml-1">콤마, 콤마 스튜디오</span></div>
+                    </div>
+                    <div class="flex items-start gap-2"><span
+                            class="w-3 h-3 rounded bg-emerald-100 border border-emerald-300 flex-shrink-0 mt-0.5"></span>
+                        <div><strong class="text-emerald-800">행복동행학교</strong><span class="text-slate-500 ml-1">링키, 행복나루, 동행나루</span></div>
+                    </div>
+                    <div class="flex items-start gap-2"><span
+                            class="w-3 h-3 rounded bg-amber-100 border border-amber-300 flex-shrink-0 mt-0.5"></span>
+                        <div><strong class="text-amber-800">방과후아카데미</strong><span class="text-slate-500 ml-1">신나루, 빛나루</span></div>
+                    </div>
+                    <div class="flex items-start gap-2"><span
+                            class="w-3 h-3 rounded bg-indigo-100 border border-indigo-300 flex-shrink-0 mt-0.5"></span>
+                        <div><strong class="text-indigo-800">2층 방송문화콘텐츠공작소</strong><span class="text-slate-500 ml-1">미디어나루, 방송나루, 스튜디오M, 스튜디오H</span></div>
+                    </div>
                 </div>
             </div>
 
-            <!-- Team Color Legend -->
+            <!-- Team Color Legend (동적 생성) -->
             <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-3">
                 <h3 class="text-[11px] font-bold text-slate-700 mb-2 flex items-center gap-1.5">
                     <i data-lucide="palette" class="w-3.5 h-3.5 text-slate-400"></i> 활동단 색상
                 </h3>
-                <div class="grid grid-cols-2 gap-1">
-                    <div class="flex items-center gap-1.5 bg-amber-100 border border-amber-300 rounded-lg px-2 py-1">
-                        <span class="w-2 h-2 rounded-full bg-amber-400"></span><span
-                            class="text-[9px] font-bold text-amber-800">나루지기</span>
-                    </div>
-                    <div class="flex items-center gap-1.5 bg-sky-100 border border-sky-300 rounded-lg px-2 py-1"><span
-                            class="w-2 h-2 rounded-full bg-sky-400"></span><span
-                            class="text-[9px] font-bold text-sky-800">다힘</span></div>
-                    <div
-                        class="flex items-center gap-1.5 bg-emerald-100 border border-emerald-300 rounded-lg px-2 py-1">
-                        <span class="w-2 h-2 rounded-full bg-emerald-400"></span><span
-                            class="text-[9px] font-bold text-emerald-800">진로스토리</span>
-                    </div>
-                    <div class="flex items-center gap-1.5 bg-indigo-100 border border-indigo-300 rounded-lg px-2 py-1">
-                        <span class="w-2 h-2 rounded-full bg-indigo-400"></span><span
-                            class="text-[9px] font-bold text-indigo-800">대학생미디어</span>
-                    </div>
-                    <div class="flex items-center gap-1.5 bg-blue-100 border border-blue-300 rounded-lg px-2 py-1"><span
-                            class="w-2 h-2 rounded-full bg-blue-400"></span><span
-                            class="text-[9px] font-bold text-blue-800">마스코트</span></div>
-                    <div class="flex items-center gap-1.5 bg-cyan-100 border border-cyan-300 rounded-lg px-2 py-1"><span
-                            class="w-2 h-2 rounded-full bg-cyan-400"></span><span
-                            class="text-[9px] font-bold text-cyan-800">물여울</span></div>
-                    <div class="flex items-center gap-1.5 bg-orange-100 border border-orange-300 rounded-lg px-2 py-1">
-                        <span class="w-2 h-2 rounded-full bg-orange-400"></span><span
-                            class="text-[9px] font-bold text-orange-800">하프타임</span>
-                    </div>
-                    <div class="flex items-center gap-1.5 bg-purple-100 border border-purple-300 rounded-lg px-2 py-1">
-                        <span class="w-2 h-2 rounded-full bg-purple-400"></span><span
-                            class="text-[9px] font-bold text-purple-800">청소년방송국</span>
-                    </div>
-                </div>
+                <div id="team-color-legend" class="grid grid-cols-2 gap-1"></div>
             </div>
         </div>
     </main>
@@ -1339,48 +3026,351 @@
         <span id="toast-msg">알림</span>
     </div>
 
+    <!-- ===================== RESERVATION DETAIL DRAWER ===================== -->
+    <div id="reservation-detail-drawer" class="hidden fixed inset-0 z-50">
+        <div class="absolute inset-0 bg-slate-900/30 backdrop-blur-[2px]" data-close-modal="reservation-detail-drawer"
+            onclick="window.closeReservationDetails?.()"></div>
+        <aside
+            class="absolute right-0 top-0 h-full w-full max-w-md bg-white shadow-2xl border-l border-slate-200 flex flex-col">
+            <div id="reservation-detail-content" class="flex flex-col h-full overflow-y-auto"></div>
+        </aside>
+    </div>
+
+    <!-- ===================== BOOKING MODAL ===================== -->
+    <div id="booking-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div class="absolute inset-0 bg-slate-900/45 backdrop-blur-sm" data-close-modal="booking-modal"></div>
+        <div class="relative bg-white w-full max-w-sm rounded-2xl border border-slate-200 shadow-2xl overflow-hidden">
+            <div class="p-5 border-b border-slate-100">
+                <div class="flex items-center gap-3">
+                    <div class="bg-teal-50 text-teal-600 p-2 rounded-xl"><i data-lucide="calendar-plus" class="w-5 h-5"></i></div>
+                    <div>
+                        <h2 class="text-base font-black text-slate-900">예약</h2>
+                        <p id="booking-modal-subtitle" class="text-xs text-slate-400 mt-0.5"></p>
+                    </div>
+                </div>
+            </div>
+            <div class="p-5 flex flex-col gap-3 max-h-[60vh] overflow-y-auto">
+                <!-- Range time selectors (hidden for single booking) -->
+                <div id="booking-range-section" class="hidden flex flex-col gap-3 pb-3 border-b border-slate-100">
+                    <div class="grid grid-cols-2 gap-2">
+                        <div>
+                            <label class="block text-xs font-bold text-slate-600 mb-1">공간</label>
+                            <select id="bm-room" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400 bg-white"></select>
+                        </div>
+                        <div class="grid grid-cols-2 gap-1">
+                            <div>
+                                <label class="block text-xs font-bold text-slate-600 mb-1">시작</label>
+                                <select id="bm-start" class="w-full px-2 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400 bg-white"></select>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-slate-600 mb-1">종료</label>
+                                <select id="bm-end" class="w-full px-2 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400 bg-white"></select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <!-- Common fields -->
+                <div>
+                    <label class="block text-xs font-bold text-slate-600 mb-1">수업명 / 활동명</label>
+                    <input id="bm-lesson" type="text" maxlength="30" placeholder="예: 나루지기 정기모임 (생략 가능)" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-slate-600 mb-1">담당자</label>
+                    <input id="bm-person" type="text" maxlength="20" placeholder="담당자 이름" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-slate-600 mb-1">예약 사유 / 목적</label>
+                    <textarea id="bm-reason" rows="2" maxlength="50" placeholder="생략 가능 · 최대 50자" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400 resize-none"></textarea>
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-slate-600 mb-1">메모</label>
+                    <textarea id="bm-memo" rows="2" maxlength="100" placeholder="추가 메모 (생략 가능, 최대 100자)" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400 resize-none"></textarea>
+                </div>
+            </div>
+            <div class="p-4 bg-slate-50 border-t border-slate-100 flex gap-2">
+                <button id="bm-cancel" class="flex-1 py-2.5 rounded-xl text-sm font-bold bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 transition-colors">닫기</button>
+                <button id="bm-submit" class="flex-1 py-2.5 rounded-xl text-sm font-bold bg-teal-600 text-white hover:bg-teal-700 transition-colors">예약</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===================== CANCEL RESERVATION MODAL ===================== -->
+    <div id="cancel-reservation-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div class="absolute inset-0 bg-slate-900/45 backdrop-blur-sm" data-close-modal="cancel-reservation-modal"></div>
+        <div class="relative bg-white w-full max-w-sm rounded-2xl border border-slate-200 shadow-2xl overflow-hidden">
+            <div class="p-5 border-b border-slate-100">
+                <div class="flex items-start gap-3">
+                    <div class="bg-red-50 text-red-600 p-2 rounded-xl"><i data-lucide="trash-2" class="w-5 h-5"></i>
+                    </div>
+                    <div>
+                        <h2 id="cancel-modal-title" class="text-base font-black text-slate-900">예약 취소</h2>
+                        <p class="text-xs text-slate-400 mt-0.5">취소 후 웹과 시트에 반영됩니다</p>
+                    </div>
+                </div>
+            </div>
+            <div class="p-5 space-y-4">
+                <div id="cancel-modal-summary" class="rounded-xl bg-slate-50 border border-slate-100 px-3 py-3"></div>
+                <div id="cancel-reason-wrap" class="hidden">
+                    <label class="block text-xs font-bold text-slate-600 mb-1.5">취소 사유</label>
+                    <textarea id="cancel-reason-input" rows="3" maxlength="50"
+                        class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-400 resize-none"
+                        placeholder="생략 가능 · 최대 50자"></textarea>
+                </div>
+            </div>
+            <div class="p-4 bg-slate-50 border-t border-slate-100 flex gap-2">
+                <button id="cancel-modal-close"
+                    class="flex-1 py-2.5 rounded-xl text-sm font-bold bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 transition-colors">닫기</button>
+                <button id="cancel-modal-submit"
+                    class="flex-1 py-2.5 rounded-xl text-sm font-bold bg-red-600 text-white hover:bg-red-700 transition-colors">취소 실행</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===================== ROOM BLOCK MODAL ===================== -->
+    <div id="room-block-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div class="absolute inset-0 bg-slate-900/45 backdrop-blur-sm" onclick="hideModal('room-block-modal')"></div>
+        <div class="relative bg-white w-full max-w-sm rounded-2xl border border-slate-200 shadow-2xl overflow-hidden">
+            <div class="p-5 border-b border-slate-100">
+                <div class="flex items-center gap-3">
+                    <div class="bg-purple-50 text-purple-600 p-2 rounded-xl"><i data-lucide="lock" class="w-5 h-5"></i></div>
+                    <div>
+                        <h2 class="text-base font-black text-slate-900">전용 시간 설정</h2>
+                        <p class="text-xs text-slate-400 mt-0.5">특정 활동단만 예약 가능한 시간대 지정</p>
+                    </div>
+                    <button onclick="hideModal('room-block-modal')" class="ml-auto p-1.5 rounded-lg text-slate-400 hover:bg-slate-100"><i data-lucide="x" class="w-4 h-4"></i></button>
+                </div>
+            </div>
+            <div class="p-5 flex flex-col gap-3 max-h-[55vh] overflow-y-auto">
+                <div class="grid grid-cols-2 gap-2">
+                    <div>
+                        <label class="block text-xs font-bold text-slate-600 mb-1">요일</label>
+                        <select id="rb-day" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-400 bg-white">
+                            <option value="mon">월</option><option value="tue">화</option><option value="wed">수</option>
+                            <option value="thu">목</option><option value="fri">금</option><option value="sat">토</option><option value="sun">일</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-slate-600 mb-1">공간</label>
+                        <select id="rb-room" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-400 bg-white"></select>
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-2">
+                    <div>
+                        <label class="block text-xs font-bold text-slate-600 mb-1">시작 시간</label>
+                        <select id="rb-start" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-400 bg-white"></select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-slate-600 mb-1">종료 시간</label>
+                        <select id="rb-end" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-400 bg-white"></select>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-slate-600 mb-1">전용 대상</label>
+                    <select id="rb-team" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-400 bg-white">
+                        <!-- 활동단 목록은 JS로 채움 -->
+                        <option value="__custom__">기타 (특정 사용자 지정)</option>
+                    </select>
+                </div>
+                <!-- 기타: 특정 사용자 지정 영역 -->
+                <div id="rb-custom-users-wrap" class="hidden flex flex-col gap-2 bg-purple-50 border border-purple-100 rounded-xl p-3">
+                    <p class="text-[11px] font-bold text-purple-700">예약 허용할 사용자 추가</p>
+                    <div class="relative">
+                        <input id="rb-user-search" type="text" placeholder="이름 또는 아이디 검색" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-400 bg-white">
+                        <div id="rb-user-dropdown" class="hidden absolute left-0 top-full mt-1 z-50 w-full bg-white border border-slate-200 rounded-xl shadow-xl max-h-36 overflow-y-auto"></div>
+                    </div>
+                    <div id="rb-user-chips" class="flex flex-wrap gap-1 min-h-[24px]">
+                        <span class="text-[10px] text-purple-400">추가한 사용자가 여기에 표시됩니다</span>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-slate-600 mb-1">메모 (선택)</label>
+                    <input id="rb-note" type="text" maxlength="50" placeholder="예: 방송국 정기 녹화 시간" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-400">
+                </div>
+                <!-- 기존 블록 목록 -->
+                <div>
+                    <p class="text-xs font-bold text-slate-600 mb-2">설정된 전용 시간</p>
+                    <div id="rb-list" class="flex flex-col gap-1.5 max-h-40 overflow-y-auto"></div>
+                </div>
+            </div>
+            <div class="p-4 bg-slate-50 border-t border-slate-100 flex gap-2">
+                <button onclick="hideModal('room-block-modal')" class="flex-1 py-2.5 rounded-xl text-sm font-bold bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 transition-colors">닫기</button>
+                <button id="rb-submit" class="flex-1 py-2.5 rounded-xl text-sm font-bold bg-purple-600 text-white hover:bg-purple-700 transition-colors">추가</button>
+            </div>
+        </div>
+    </div>
+
     <!-- ===================== LOGIN MODAL ===================== -->
     <div id="login-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4">
         <div class="absolute inset-0 bg-black/50 backdrop-blur-sm"></div>
         <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm border border-slate-200 overflow-hidden">
-            <!-- Header gradient -->
-            <div class="bg-gradient-to-br from-teal-500 to-teal-600 p-6 text-white">
+            <div class="bg-gradient-to-br from-teal-500 to-teal-600 p-5 text-white">
                 <div class="flex items-center gap-3">
                     <div class="bg-white/20 p-2 rounded-xl"><i data-lucide="calendar-range" class="w-5 h-5"></i></div>
-                    <div>
-                        <h2 class="text-base font-bold">유스나루 예약 시스템</h2>
-                        <p class="text-xs text-teal-100">아이디와 비밀번호로 로그인하세요</p>
-                    </div>
+                    <div><h2 class="text-base font-bold">유스나루 예약 시스템</h2></div>
                 </div>
             </div>
-            <button id="close-login-modal"
-                class="absolute top-4 right-4 text-white/70 hover:text-white transition-colors">
+            <button id="close-login-modal" class="absolute top-4 right-4 text-white/70 hover:text-white transition-colors">
                 <i data-lucide="x" class="w-5 h-5"></i>
             </button>
-            <div class="p-6">
-                <form id="login-form" class="flex flex-col gap-4">
+            <!-- 탭 -->
+            <div class="flex border-b border-slate-100">
+                <button id="ltab-login" onclick="switchLoginTab('login')" class="flex-1 py-2.5 text-xs font-bold transition-all text-teal-600 border-b-2 border-teal-500 bg-teal-50">로그인</button>
+                <button id="ltab-register" onclick="switchLoginTab('register')" class="flex-1 py-2.5 text-xs font-bold transition-all text-slate-400">회원가입</button>
+                <button id="ltab-recover" onclick="switchLoginTab('recover')" class="flex-1 py-2.5 text-xs font-bold transition-all text-slate-400">비밀번호 찾기</button>
+            </div>
+            <!-- 공통 에러 -->
+            <!-- ---- 로그인 폼 ---- -->
+            <div id="lform-login" class="p-5">
+                <form id="login-form" class="flex flex-col gap-3.5">
                     <div>
-                        <label class="block text-xs font-semibold text-slate-600 mb-1.5 flex items-center gap-1">
-                            <i data-lucide="user" class="w-3 h-3"></i> 아이디
-                        </label>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1.5">아이디</label>
                         <input id="login-username" type="text" placeholder="아이디를 입력하세요" required autocomplete="username"
-                            class="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400 focus:border-transparent transition-all placeholder-slate-300">
+                            class="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400 transition-all placeholder-slate-300">
                     </div>
                     <div>
-                        <label class="block text-xs font-semibold text-slate-600 mb-1.5 flex items-center gap-1">
-                            <i data-lucide="lock" class="w-3 h-3"></i> 비밀번호
-                        </label>
-                        <input id="login-password" type="password" placeholder="비밀번호를 입력하세요" required
-                            autocomplete="current-password"
-                            class="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400 focus:border-transparent transition-all placeholder-slate-300">
+                        <label class="block text-xs font-semibold text-slate-600 mb-1.5">비밀번호</label>
+                        <input id="login-password" type="password" placeholder="비밀번호를 입력하세요" required autocomplete="current-password"
+                            class="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400 transition-all placeholder-slate-300">
                     </div>
-                    <div id="login-error"
-                        class="hidden bg-red-50 border border-red-200 text-red-600 text-xs px-3 py-2 rounded-xl"></div>
-
+                    <div id="login-error" class="hidden bg-red-50 border border-red-200 text-red-600 text-xs px-3 py-2 rounded-xl"></div>
                     <button id="login-submit-btn" type="submit"
-                        class="w-full bg-gradient-to-r from-teal-500 to-teal-600 hover:from-teal-600 hover:to-teal-700 text-white font-bold py-3 rounded-xl transition-all shadow-sm hover:shadow-md text-sm">
-                        <span class="flex items-center gap-2 justify-center"><i data-lucide="log-in"
-                                class="w-4 h-4"></i> 로그인</span>
+                        class="w-full bg-gradient-to-r from-teal-500 to-teal-600 hover:from-teal-600 hover:to-teal-700 text-white font-bold py-3 rounded-xl transition-all shadow-sm text-sm flex items-center justify-center gap-2">
+                        <i data-lucide="log-in" class="w-4 h-4"></i> 로그인
+                    </button>
+                </form>
+            </div>
+            <!-- ---- 회원가입 폼 ---- -->
+            <div id="lform-register" class="hidden p-5 max-h-[70vh] overflow-y-auto">
+                <form id="register-form" class="flex flex-col gap-3">
+                    <div class="grid grid-cols-2 gap-2">
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-600 mb-1">아이디 *</label>
+                            <input id="reg-username" type="text" placeholder="영소문자·숫자·_" required autocomplete="off"
+                                class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400 placeholder-slate-300">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-600 mb-1">표시 이름 *</label>
+                            <input id="reg-dispname" type="text" placeholder="홍길동" required
+                                class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400 placeholder-slate-300">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">비밀번호 * (6자 이상)</label>
+                        <input id="reg-password" type="password" placeholder="비밀번호" required
+                            class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">비밀번호 확인 *</label>
+                        <input id="reg-password2" type="password" placeholder="비밀번호 재입력" required
+                            class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">초대코드 *</label>
+                        <input id="reg-invite" type="text" placeholder="관리자에게 받은 코드 입력" required autocomplete="off"
+                            class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400 uppercase tracking-widest">
+                    </div>
+                    <div class="border-t border-slate-100 pt-3">
+                        <p class="text-[10px] text-slate-400 mb-2">비밀번호 찾기를 위한 보안 질문을 설정하세요</p>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">보안 질문 *</label>
+                        <select id="reg-sec-q" required class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400 bg-white">
+                            <option value="">질문 선택...</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">보안 답변 *</label>
+                        <input id="reg-sec-a" type="text" placeholder="답변 입력" required autocomplete="off"
+                            class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400">
+                    </div>
+                    <div id="reg-error" class="hidden bg-red-50 border border-red-200 text-red-600 text-xs px-3 py-2 rounded-xl"></div>
+                    <button id="reg-submit-btn" type="submit"
+                        class="w-full bg-gradient-to-r from-teal-500 to-teal-600 hover:from-teal-600 hover:to-teal-700 text-white font-bold py-2.5 rounded-xl transition-all text-sm">
+                        회원가입
+                    </button>
+                </form>
+            </div>
+            <!-- ---- 비밀번호 찾기 폼 ---- -->
+            <div id="lform-recover" class="hidden p-5">
+                <div id="rec-error" class="hidden bg-red-50 border border-red-200 text-red-600 text-xs px-3 py-2 rounded-xl mb-3"></div>
+                <!-- Step 1: 아이디 입력 -->
+                <form id="rec-step1" class="flex flex-col gap-3" onsubmit="handleRecovery1(event)">
+                    <p class="text-xs text-slate-500">가입 시 등록한 아이디를 입력하세요.</p>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">아이디</label>
+                        <input id="rec-username" type="text" placeholder="아이디 입력" required autocomplete="off"
+                            class="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400">
+                    </div>
+                    <button id="rec-step1-btn" type="submit"
+                        class="w-full bg-teal-600 hover:bg-teal-700 text-white font-bold py-2.5 rounded-xl text-sm">다음</button>
+                </form>
+                <!-- Step 2: 보안 질문 -->
+                <form id="rec-step2" class="hidden flex flex-col gap-3" onsubmit="handleRecovery2(event)">
+                    <div class="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5">
+                        <p class="text-[10px] text-slate-400 mb-0.5">보안 질문</p>
+                        <p id="rec-question-text" class="text-sm font-semibold text-slate-700"></p>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">답변</label>
+                        <input id="rec-answer" type="text" placeholder="보안 답변 입력" required autocomplete="off"
+                            class="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400">
+                    </div>
+                    <button id="rec-step2-btn" type="submit"
+                        class="w-full bg-teal-600 hover:bg-teal-700 text-white font-bold py-2.5 rounded-xl text-sm">확인</button>
+                </form>
+                <!-- Step 3: 새 비밀번호 -->
+                <form id="rec-step3" class="hidden flex flex-col gap-3" onsubmit="handleRecovery3(event)">
+                    <p class="text-xs text-slate-500 bg-teal-50 border border-teal-100 rounded-xl px-3 py-2">신원이 확인되었습니다. 새 비밀번호를 입력하세요.</p>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">새 비밀번호 (6자 이상)</label>
+                        <input id="rec-newpw" type="password" placeholder="새 비밀번호" required
+                            class="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">새 비밀번호 확인</label>
+                        <input id="rec-newpw2" type="password" placeholder="새 비밀번호 재입력" required
+                            class="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400">
+                    </div>
+                    <button id="rec-step3-btn" type="submit"
+                        class="w-full bg-teal-600 hover:bg-teal-700 text-white font-bold py-2.5 rounded-xl text-sm">비밀번호 변경</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===================== CHANGE PASSWORD MODAL ===================== -->
+    <div id="change-pw-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div class="absolute inset-0 bg-black/50 backdrop-blur-sm" onclick="hideModal('change-pw-modal')"></div>
+        <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm border border-slate-200 overflow-hidden">
+            <div class="bg-gradient-to-br from-slate-700 to-slate-800 p-5 text-white flex items-center gap-3">
+                <div class="bg-white/20 p-2 rounded-xl"><i data-lucide="key-round" class="w-4 h-4"></i></div>
+                <div><h2 class="text-sm font-bold">비밀번호 변경</h2><p class="text-xs text-slate-300">현재 비밀번호 확인 후 변경합니다</p></div>
+            </div>
+            <button onclick="hideModal('change-pw-modal')" class="absolute top-4 right-4 text-white/70 hover:text-white"><i data-lucide="x" class="w-5 h-5"></i></button>
+            <div class="p-5">
+                <form id="chpw-form" class="flex flex-col gap-3" onsubmit="handlePasswordChange(event)">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">현재 비밀번호</label>
+                        <input id="chpw-current" type="password" placeholder="현재 비밀번호" required
+                            class="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">새 비밀번호 (6자 이상)</label>
+                        <input id="chpw-new" type="password" placeholder="새 비밀번호" required
+                            class="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">새 비밀번호 확인</label>
+                        <input id="chpw-new2" type="password" placeholder="새 비밀번호 재입력" required
+                            class="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400">
+                    </div>
+                    <div class="border-t border-slate-100 pt-3">
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">보안 답변 <span class="text-slate-400 font-normal">(선택 · 비밀번호 찾기 유지용)</span></label>
+                        <input id="chpw-sec-a" type="text" placeholder="가입 시 등록한 보안 답변" autocomplete="off"
+                            class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400 placeholder-slate-300">
+                    </div>
+                    <div id="chpw-error" class="hidden bg-red-50 border border-red-200 text-red-600 text-xs px-3 py-2 rounded-xl"></div>
+                    <button id="chpw-submit" type="submit"
+                        class="w-full bg-slate-700 hover:bg-slate-800 text-white font-bold py-2.5 rounded-xl transition-all text-sm">
+                        비밀번호 변경
                     </button>
                 </form>
             </div>
@@ -1519,6 +3509,105 @@
             initLoginErrorObserver();
         }
     </script>
+
+    <!-- ===================== CUSTOM CONFIRM MODAL ===================== -->
+    <div id="confirm-modal" class="hidden fixed inset-0 z-[999] flex items-center justify-center p-4">
+        <div class="absolute inset-0 bg-black/40 backdrop-blur-sm" id="confirm-modal-backdrop"></div>
+        <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-xs border border-slate-100 overflow-hidden animate-in">
+            <div id="confirm-modal-header" class="h-1.5 w-full bg-amber-400"></div>
+            <div class="p-6">
+                <div class="flex items-start gap-3 mb-4">
+                    <div id="confirm-modal-icon" class="w-10 h-10 rounded-full bg-amber-50 flex items-center justify-center shrink-0">
+                        <i data-lucide="alert-triangle" class="w-5 h-5 text-amber-500"></i>
+                    </div>
+                    <div>
+                        <h3 id="confirm-modal-title" class="text-sm font-bold text-slate-800 mb-1">확인</h3>
+                        <p id="confirm-modal-msg" class="text-xs text-slate-500 leading-relaxed whitespace-pre-line"></p>
+                    </div>
+                </div>
+                <div class="flex gap-2">
+                    <button id="confirm-modal-cancel" class="flex-1 py-2.5 rounded-xl text-sm font-bold bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors">취소</button>
+                    <button id="confirm-modal-ok" class="flex-1 py-2.5 rounded-xl text-sm font-bold text-white transition-colors bg-teal-600 hover:bg-teal-700">확인</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- NOTIFICATION PANEL -->
+    <div id="notif-panel" class="hidden fixed top-14 right-2 sm:right-4 z-[900] w-72 bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
+    </div>
+
+
+    <!-- Mobile Bottom Drawer: Team Selector -->
+    <div id="mobile-drawer-overlay" class="lg:hidden hidden fixed inset-0 z-[90] bg-black/40 backdrop-blur-sm" onclick="closeMobileDrawer()"></div>
+    <div id="mobile-drawer" class="lg:hidden hidden fixed bottom-0 left-0 right-0 z-[91] bg-white rounded-t-2xl shadow-2xl border-t border-slate-200 flex flex-col" style="max-height: 75dvh;">
+        <div class="flex items-center justify-between px-4 py-3 border-b border-slate-100 shrink-0">
+            <div class="flex gap-1 flex-1">
+                <button id="mobile-dtab-teams" onclick="switchMobileDrawerTab('teams')" class="flex-1 py-2 rounded-lg text-xs font-bold bg-teal-500 text-white transition-colors flex items-center justify-center gap-1.5">
+                    <i data-lucide="users" class="w-3.5 h-3.5"></i> 활동단
+                </button>
+                <button id="mobile-dtab-admin" onclick="switchMobileDrawerTab('admin')" class="flex-1 py-2 rounded-lg text-xs font-bold bg-slate-100 text-slate-500 transition-colors flex items-center justify-center gap-1.5">
+                    <i data-lucide="shield" class="w-3.5 h-3.5"></i> 관리자
+                </button>
+                <button id="mobile-dtab-logs" onclick="switchMobileDrawerTab('logs')" class="flex-1 py-2 rounded-lg text-xs font-bold bg-slate-100 text-slate-500 transition-colors flex items-center justify-center gap-1.5">
+                    <i data-lucide="activity" class="w-3.5 h-3.5"></i> 로그
+                </button>
+            </div>
+            <button onclick="closeMobileDrawer()" class="ml-2 p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 shrink-0"><i data-lucide="x" class="w-4 h-4"></i></button>
+        </div>
+        <div class="overflow-y-auto flex-grow p-3">
+            <div id="mobile-panel-teams">
+                <p class="text-[10px] text-slate-400 mb-2 font-medium">활동단 선택 후 빈 칸 클릭으로 예약</p>
+                <div id="mobile-team-selectors" class="flex flex-col gap-1.5"></div>
+            </div>
+            <div id="mobile-panel-admin" class="hidden">
+                <div id="mobile-admin-section" class="hidden flex flex-col gap-2">
+                    <a href="admin.html" class="w-full flex items-center gap-2 justify-center py-2.5 px-3 bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-700 text-xs font-bold rounded-xl transition-all">
+                        <i data-lucide="shield" class="w-4 h-4"></i> 관리자 페이지 열기 →
+                    </a>
+                    <button id="mobile-btn-add-fixed" class="w-full flex items-center gap-2 justify-center py-2 px-3 bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 text-xs font-semibold rounded-xl transition-all">
+                        <i data-lucide="pin" class="w-3.5 h-3.5"></i> 고정 일정 추가
+                    </button>
+                    <button id="mobile-btn-reset" class="w-full flex items-center gap-2 justify-center py-2 px-3 bg-red-50 hover:bg-red-100 border border-red-200 text-red-600 text-xs font-semibold rounded-xl transition-all">
+                        <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> 주간 리셋
+                    </button>
+                </div>
+                <div id="mobile-admin-locked" class="text-center py-10 text-slate-400">
+                    <i data-lucide="lock" class="w-10 h-10 mx-auto mb-3 opacity-20"></i>
+                    <p class="text-xs font-medium">관리자 로그인 필요</p>
+                </div>
+            </div>
+            <div id="mobile-panel-logs" class="hidden">
+                <div class="flex items-center gap-1.5 mb-3 bg-slate-100 p-1 rounded-lg text-[10px]">
+                    <button onclick="setLogFilter('all')" class="flex-1 py-1 rounded font-bold text-center transition-all bg-white text-teal-700 shadow-xs">전체</button>
+                    <button onclick="setLogFilter('my-res')" class="flex-1 py-1 rounded font-bold text-center transition-all text-slate-600">내 신청</button>
+                    <button onclick="setLogFilter('my-cancel')" class="flex-1 py-1 rounded font-bold text-center transition-all text-slate-600">강제취소</button>
+                </div>
+                <div id="mobile-logs-list" class="flex flex-col gap-1.5"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Mobile sticky bottom bar -->
+    <div id="mobile-bottom-bar" class="lg:hidden hidden fixed bottom-0 left-0 right-0 z-[80] bg-white/95 backdrop-blur-sm border-t border-slate-200 px-3 py-2 flex items-center gap-1.5 shadow-lg">
+        <button id="mobile-team-open-btn" onclick="openMobileDrawer('teams')" class="flex-1 flex items-center gap-2 py-2 px-3 bg-teal-50 border border-teal-200 text-teal-700 text-xs font-bold rounded-xl transition-all">
+            <i data-lucide="users" class="w-3.5 h-3.5 shrink-0"></i>
+            <span id="mobile-bottom-team-label" class="truncate">활동단 선택</span>
+        </button>
+        <button id="mobile-btn-archive" class="shrink-0 flex items-center py-2 px-2.5 bg-violet-50 text-violet-600 text-xs font-semibold rounded-xl transition-colors hover:bg-violet-100" title="과거 기록">
+            <i data-lucide="history" class="w-3.5 h-3.5"></i>
+        </button>
+        <button id="mobile-btn-export" class="shrink-0 flex items-center py-2 px-2.5 bg-emerald-50 text-emerald-600 text-xs font-semibold rounded-xl transition-colors hover:bg-emerald-100" title="엑셀 저장">
+            <i data-lucide="download" class="w-3.5 h-3.5"></i>
+        </button>
+        <button onclick="openMobileDrawer('admin')" class="shrink-0 flex items-center py-2 px-2.5 bg-slate-100 text-slate-600 text-xs font-semibold rounded-xl transition-colors hover:bg-slate-200" title="관리자">
+            <i data-lucide="shield" class="w-3.5 h-3.5"></i>
+        </button>
+        <button onclick="openMobileDrawer('logs')" class="shrink-0 flex items-center py-2 px-2.5 bg-slate-100 text-slate-600 text-xs font-semibold rounded-xl transition-colors hover:bg-slate-200" title="로그">
+            <i data-lucide="activity" class="w-3.5 h-3.5"></i>
+        </button>
+    </div>
+
 </body>
 
 </html>
