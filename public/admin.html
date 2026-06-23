@@ -443,6 +443,10 @@
               <option value="user">일반 사용자</option>
               <option value="admin">관리자</option>
             </select>
+            <select id="ic-team" class="px-3 py-2 text-sm border border-slate-200 rounded-xl bg-white">
+              <option value="">활동단 선택 (선택)</option>
+              ${TEAMS.map(t => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('')}
+            </select>
             <input id="ic-target-user" type="text" placeholder="지정 사용자 (선택)" class="px-3 py-2 text-sm border border-slate-200 rounded-xl bg-white w-36" title="특정 아이디만 사용 가능하도록 지정">
             <button onclick="exportInviteCodesExcel()" class="px-4 py-2 bg-slate-600 hover:bg-slate-700 text-white text-sm font-bold rounded-xl transition-colors flex items-center gap-1.5">
               <i data-lucide="download" class="w-4 h-4"></i> 엑셀
@@ -458,6 +462,7 @@
               <tr>
                 <th class="text-left px-4 py-3 text-xs font-bold text-slate-500">코드</th>
                 <th class="text-left px-4 py-3 text-xs font-bold text-slate-500">권한</th>
+                <th class="text-left px-4 py-3 text-xs font-bold text-slate-500">활동단</th>
                 <th class="text-left px-4 py-3 text-xs font-bold text-slate-500">상태</th>
                 <th class="text-left px-4 py-3 text-xs font-bold text-slate-500">사용자</th>
                 <th class="text-left px-4 py-3 text-xs font-bold text-slate-500">지정 사용자</th>
@@ -471,6 +476,11 @@
                 <td class="px-4 py-3 font-mono font-bold text-slate-800 tracking-widest">${esc(c.id)}</td>
                 <td class="px-4 py-3">
                   <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${c.role === 'admin' ? 'bg-amber-100 text-amber-700' : 'bg-teal-100 text-teal-700'}">${c.role === 'admin' ? '관리자' : '일반'}</span>
+                </td>
+                <td class="px-4 py-3 text-xs">
+                  ${(c.allowedTeams || []).length > 0
+                    ? (c.allowedTeams).map(tid => { const t = getTeam(tid); return t ? `<span class="inline-block px-1.5 py-0.5 text-[9px] font-bold rounded mr-1 ${t.bg} ${t.text}">${esc(t.name)}</span>` : esc(tid); }).join('')
+                    : '<span class="text-slate-400">-</span>'}
                 </td>
                 <td class="px-4 py-3">
                   <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${c.isUsed ? 'bg-slate-100 text-slate-500' : 'bg-green-100 text-green-700'}">${c.isUsed ? '사용됨' : '사용 가능'}</span>
@@ -488,15 +498,17 @@
 
       document.getElementById('ic-gen-btn')?.addEventListener('click', async () => {
         const role = document.getElementById('ic-role')?.value || 'user';
+        const teamId = document.getElementById('ic-team')?.value || '';
         const targetUsername = document.getElementById('ic-target-user')?.value.trim() || null;
         const code = genCode();
         await setDoc(doc(db, 'invite_codes', code), {
-          role, allowedTeams: [], isUsed: false,
+          role, allowedTeams: teamId ? [teamId] : [], isUsed: false,
           targetUsername,
           createdBy: currentUser?.username || 'admin',
           createdAt: serverTimestamp(), usedBy: null, usedAt: null
         });
-        showToast(`초대코드 생성: ${code}`, 'success');
+        const teamName = teamId ? (getTeam(teamId)?.name || teamId) : '활동단 미지정';
+        showToast(`초대코드 생성: ${code} (${teamName})`, 'success');
         await renderInviteCodes();
       });
       lucide.createIcons();
@@ -522,6 +534,7 @@
         return {
           코드: c.id,
           권한: c.role === 'admin' ? '관리자' : '일반',
+          활동단: (c.allowedTeams || []).map(tid => getTeam(tid)?.name || tid).join(', ') || '-',
           상태: c.isUsed ? '사용됨' : '사용 가능',
           사용자: c.usedBy || '',
           지정사용자: c.targetUsername || '',
