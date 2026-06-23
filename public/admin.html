@@ -448,6 +448,10 @@
               ${TEAMS.map(t => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('')}
             </select>
             <input id="ic-target-user" type="text" placeholder="지정 사용자 (선택)" class="px-3 py-2 text-sm border border-slate-200 rounded-xl bg-white w-36" title="특정 아이디만 사용 가능하도록 지정">
+            <div class="flex items-center gap-1.5 border border-slate-200 rounded-xl bg-white px-3 py-2">
+              <label class="text-xs text-slate-500 whitespace-nowrap">생성 개수</label>
+              <input id="ic-count" type="number" min="1" max="50" value="1" class="w-14 text-sm text-center border-0 focus:outline-none bg-transparent font-bold text-slate-700">
+            </div>
             <button onclick="exportInviteCodesExcel()" class="px-4 py-2 bg-slate-600 hover:bg-slate-700 text-white text-sm font-bold rounded-xl transition-colors flex items-center gap-1.5">
               <i data-lucide="download" class="w-4 h-4"></i> 엑셀
             </button>
@@ -497,18 +501,34 @@
         </div>`;
 
       document.getElementById('ic-gen-btn')?.addEventListener('click', async () => {
+        const btn = document.getElementById('ic-gen-btn');
         const role = document.getElementById('ic-role')?.value || 'user';
         const teamId = document.getElementById('ic-team')?.value || '';
         const targetUsername = document.getElementById('ic-target-user')?.value.trim() || null;
-        const code = genCode();
-        await setDoc(doc(db, 'invite_codes', code), {
-          role, allowedTeams: teamId ? [teamId] : [], isUsed: false,
-          targetUsername,
-          createdBy: currentUser?.username || 'admin',
-          createdAt: serverTimestamp(), usedBy: null, usedAt: null
-        });
+        const count = Math.min(50, Math.max(1, parseInt(document.getElementById('ic-count')?.value) || 1));
         const teamName = teamId ? (getTeam(teamId)?.name || teamId) : '활동단 미지정';
-        showToast(`초대코드 생성: ${code} (${teamName})`, 'success');
+
+        btn.disabled = true;
+        btn.textContent = `생성 중...`;
+        try {
+          const codes = Array.from({ length: count }, () => genCode());
+          await Promise.all(codes.map(code => setDoc(doc(db, 'invite_codes', code), {
+            role, allowedTeams: teamId ? [teamId] : [], isUsed: false,
+            targetUsername: count === 1 ? targetUsername : null,
+            createdBy: currentUser?.username || 'admin',
+            createdAt: serverTimestamp(), usedBy: null, usedAt: null
+          })));
+          showToast(
+            count === 1
+              ? `초대코드 생성: ${codes[0]} (${teamName})`
+              : `${count}개 초대코드 생성 완료 (${teamName})`,
+            'success'
+          );
+        } finally {
+          btn.disabled = false;
+          btn.innerHTML = `<i data-lucide="plus" class="w-4 h-4"></i> 코드 생성`;
+          lucide.createIcons();
+        }
         await renderInviteCodes();
       });
       lucide.createIcons();
