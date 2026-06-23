@@ -96,28 +96,28 @@ firebase deploy --only hosting
 <table>
   <tr>
     <td align="center">
-      <img src="photos/park-yeowon.jpg" width="80" height="80" style="border-radius:50%;object-fit:cover;" alt="박여원"><br>
+      <img src="photos/yeowon.jpeg" width="80" height="80" style="border-radius:50%;object-fit:cover;" alt="박여원"><br>
       <b>박여원</b><br>
       <sub>
         <!-- 기여 항목 -->
       </sub>
     </td>
     <td align="center">
-      <img src="photos/woo-chaeyeon.jpg" width="80" height="80" style="border-radius:50%;object-fit:cover;" alt="우채연"><br>
+      <img src="photos/chaeyeon.jpeg" width="80" height="80" style="border-radius:50%;object-fit:cover;" alt="우채연"><br>
       <b>우채연</b><br>
       <sub>
         <!-- 기여 항목 -->
       </sub>
     </td>
     <td align="center">
-      <img src="photos/jo-eunseon.jpg" width="80" height="80" style="border-radius:50%;object-fit:cover;" alt="조은선"><br>
+      <img src="photos/eunseon.jpeg" width="80" height="80" style="border-radius:50%;object-fit:cover;" alt="조은선"><br>
       <b>조은선</b><br>
       <sub>
         <!-- 기여 항목 -->
       </sub>
     </td>
     <td align="center">
-      <img src="photos/jo-minwoo.jpg" width="80" height="80" style="border-radius:50%;object-fit:cover;" alt="조민우"><br>
+      <img src="photos/minwoo.jpg" width="80" height="80" style="border-radius:50%;object-fit:cover;" alt="조민우"><br>
       <b>조민우</b><br>
       <sub>
         <!-- 기여 항목 -->
