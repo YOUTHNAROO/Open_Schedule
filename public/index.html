@@ -540,7 +540,7 @@
             let _selecting = false;
             const refresh = () => {
                 if (_selecting) return;
-                const q = (el.value || '').toLowerCase().trim();
+                const q = (el.value || '').replace(/^@/, '').toLowerCase().trim();
                 if (!q) { dd.classList.add('hidden'); return; }
                 const hits = USERS_CACHE.filter(u =>
                     (u.username || '').toLowerCase().includes(q) ||
@@ -1995,10 +1995,14 @@
                     </div>
                     <div>
                         <label class="block text-xs font-bold text-slate-600 mb-1.5">시트 색상</label>
-                        <div class="flex items-center gap-2">
+                        <div class="flex items-center gap-2 mb-2">
                             <input type="color" id="detail-sheet-color-picker" value="${sheetColor || '#ffffff'}" class="w-9 h-9 rounded border border-slate-200 cursor-pointer p-0.5">
                             <input id="detail-sheet-color-hex" value="${sheetColor || ''}" placeholder="#없음 (색상 없음)" maxlength="7" class="flex-1 px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-400 font-mono">
                             <button id="detail-sheet-color-clear" type="button" class="px-2.5 py-2 text-xs text-slate-400 hover:text-red-500 border border-slate-200 rounded-lg hover:border-red-200 transition-colors" title="색상 제거">✕</button>
+                        </div>
+                        <div class="flex flex-wrap gap-1.5">
+                            ${TEAMS.filter(t => t.hex).map(t => `<button type="button" class="color-palette-swatch w-6 h-6 rounded-full border-2 hover:scale-125 transition-transform cursor-pointer shrink-0 ${sheetColor === t.hex ? 'border-slate-500 scale-110' : 'border-white shadow'}" style="background:${t.hex}" data-hex="${t.hex}" title="${esc(t.name)}"></button>`).join('')}
+                            ${['#f1f5f9','#e2e8f0','#94a3b8','#475569','#1e293b'].map(hex => `<button type="button" class="color-palette-swatch w-6 h-6 rounded-full border-2 hover:scale-125 transition-transform cursor-pointer shrink-0 ${sheetColor === hex ? 'border-slate-500 scale-110' : 'border-white shadow'}" style="background:${hex}" data-hex="${hex}" title="${hex}"></button>`).join('')}
                         </div>
                     </div>` : ''}
                     <div>
@@ -2078,6 +2082,22 @@
                 const picker = document.getElementById('detail-sheet-color-picker');
                 if (hex) hex.value = '';
                 if (picker) picker.value = '#ffffff';
+                document.querySelectorAll('.color-palette-swatch').forEach(b => b.classList.replace('border-slate-500', 'border-white'));
+            });
+            document.querySelectorAll('.color-palette-swatch').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const h = btn.dataset.hex;
+                    const hexInput = document.getElementById('detail-sheet-color-hex');
+                    const picker = document.getElementById('detail-sheet-color-picker');
+                    if (hexInput) hexInput.value = h;
+                    if (picker) picker.value = h;
+                    document.querySelectorAll('.color-palette-swatch').forEach(b => {
+                        b.classList.remove('border-slate-500', 'scale-110');
+                        b.classList.add('border-white');
+                    });
+                    btn.classList.remove('border-white');
+                    btn.classList.add('border-slate-500', 'scale-110');
+                });
             });
             // 댓글 등록
             const commentInput = document.getElementById('detail-comment-input');
@@ -2156,8 +2176,7 @@
                     }
                     const res = reservations[key];
                     const isPending = res?.status === 'pending';
-                    const canSeePending = isPending && (isAdmin() || (currentUser && currentUser.id === res?.userId));
-                    if (res && (!isPending || canSeePending)) {
+                    if (res) {
                         const team = getTeam(res.teamId);
                         let displayName = res.lessonName || res.teamName;
                         if (!res.lessonName) {
