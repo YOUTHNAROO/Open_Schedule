@@ -381,6 +381,38 @@
       await addActivityLog('활동단_삭제', name, null, null);
     }
 
+    // ========== PENDING RESERVATIONS ==========
+    const DAY_LABELS = { mon:'월', tue:'화', wed:'수', thu:'목', fri:'금', sat:'토', sun:'일' };
+
+    async function getPendingReservations() {
+      const weekId = getWeekId(new Date());
+      const days = ['mon','tue','wed','thu','fri','sat','sun'];
+      const pending = [];
+      await Promise.all(days.map(async day => {
+        const snap = await getDocs(query(collection(db, `reservations/${weekId}/${day}`), where('status','==','pending')));
+        snap.forEach(d => pending.push({ weekId, day, key: d.id, ...d.data() }));
+      }));
+      pending.sort((a, b) => {
+        const di = ['mon','tue','wed','thu','fri','sat','sun'];
+        return di.indexOf(a.day) - di.indexOf(b.day) || (a.key < b.key ? -1 : 1);
+      });
+      return pending;
+    }
+
+    async function approvePendingReservation(weekId, day, key) {
+      await updateDoc(doc(db, `reservations/${weekId}/${day}`, key), { status: 'approved' });
+      await addActivityLog('예약_승인', `${day} ${key}`, null, null);
+      showToast('예약을 승인했습니다.', 'success');
+      renderDashboard();
+    }
+
+    async function rejectPendingReservation(weekId, day, key, teamName) {
+      await deleteDoc(doc(db, `reservations/${weekId}/${day}`, key));
+      await addActivityLog('예약_거절', `${day} ${key} ${teamName || ''}`, null, null);
+      showToast('예약 신청을 거절했습니다.', 'info');
+      renderDashboard();
+    }
+
     // ========== DASHBOARD STATS ==========
     async function getDashboardStats() {
       const [uSnap, tSnap] = await Promise.all([getDocs(collection(db, 'users')), getDocs(collection(db, 'teams'))]);
@@ -574,9 +606,38 @@
       const panel = document.getElementById('panel-dashboard');
       if (!panel) return;
       panel.innerHTML = `<div class="text-center py-16 text-slate-400"><div class="w-8 h-8 border-4 border-slate-200 border-t-teal-500 rounded-full animate-spin mx-auto mb-4"></div>로딩 중...</div>`;
-      const stats = await getDashboardStats();
-      const ACTION_COLOR = { '예약_생성': 'bg-emerald-100 text-emerald-700', '예약_취소': 'bg-slate-100 text-slate-600', '예약_강제취소': 'bg-red-100 text-red-700', '고정일정_추가': 'bg-blue-100 text-blue-700', '고정일정_삭제': 'bg-orange-100 text-orange-700', '주간리셋': 'bg-purple-100 text-purple-700', '사용자_생성': 'bg-teal-100 text-teal-700', '사용자_수정': 'bg-yellow-100 text-yellow-700', '사용자_삭제': 'bg-red-100 text-red-700', '활동단_추가': 'bg-indigo-100 text-indigo-700', '활동단_삭제': 'bg-rose-100 text-rose-700' };
+      const [stats, pendingList] = await Promise.all([getDashboardStats(), getPendingReservations()]);
+      const ACTION_COLOR = { '예약_생성': 'bg-emerald-100 text-emerald-700', '예약_취소': 'bg-slate-100 text-slate-600', '예약_강제취소': 'bg-red-100 text-red-700', '고정일정_추가': 'bg-blue-100 text-blue-700', '고정일정_삭제': 'bg-orange-100 text-orange-700', '주간리셋': 'bg-purple-100 text-purple-700', '사용자_생성': 'bg-teal-100 text-teal-700', '사용자_수정': 'bg-yellow-100 text-yellow-700', '사용자_삭제': 'bg-red-100 text-red-700', '활동단_추가': 'bg-indigo-100 text-indigo-700', '활동단_삭제': 'bg-rose-100 text-rose-700', '예약_승인': 'bg-emerald-100 text-emerald-700', '예약_거절': 'bg-red-100 text-red-700' };
+      const pendingSection = pendingList.length === 0 ? '' : `
+    <div class="mb-6 bg-white rounded-2xl border border-orange-200 shadow-sm overflow-hidden">
+      <div class="px-5 py-4 border-b border-orange-100 flex items-center gap-2">
+        <i data-lucide="hourglass" class="w-4 h-4 text-orange-500"></i>
+        <h3 class="font-bold text-orange-700">승인 대기 예약</h3>
+        <span class="bg-orange-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full">${pendingList.length}</span>
+      </div>
+      <div class="divide-y divide-slate-50">
+        ${pendingList.map(r => {
+          const hourPart = r.key.split('-')[0] || '';
+          const roomPart = r.key.replace(/^[^-]+-/, '').replace(/_/g, '/');
+          const dayLabel = DAY_LABELS[r.day] || r.day;
+          const safeKey = JSON.stringify(r.key).replace(/"/g, '&quot;');
+          const safeWeek = JSON.stringify(r.weekId).replace(/"/g, '&quot;');
+          const safeName = JSON.stringify(r.teamName || '').replace(/"/g, '&quot;');
+          return `<div class="px-5 py-3 flex items-center gap-3 hover:bg-orange-50">
+            <div class="flex-grow min-w-0">
+              <div class="text-sm font-semibold text-slate-800 truncate">${esc(r.teamName || '')} <span class="font-normal text-slate-400 text-xs">${esc(r.userName || '')}</span></div>
+              <div class="text-xs text-slate-500 mt-0.5">${dayLabel}요일 ${hourPart} · ${esc(roomPart)}${r.note ? ` · <span class="text-teal-600">${esc(r.note)}</span>` : ''}</div>
+            </div>
+            <button onclick="approvePendingReservation(${safeWeek},${JSON.stringify(r.day).replace(/"/g,'&quot;')},${safeKey})"
+              class="flex-shrink-0 px-3 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold rounded-lg transition-colors">승인</button>
+            <button onclick="rejectPendingReservation(${safeWeek},${JSON.stringify(r.day).replace(/"/g,'&quot;')},${safeKey},${safeName})"
+              class="flex-shrink-0 px-3 py-1.5 bg-slate-100 hover:bg-red-100 text-slate-600 hover:text-red-600 text-xs font-bold rounded-lg transition-colors">거절</button>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
       panel.innerHTML = `
+    ${pendingSection}
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
       <div class="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex items-center gap-4">
         <div class="bg-teal-100 text-teal-600 p-3 rounded-xl"><i data-lucide="users" class="w-6 h-6"></i></div>
@@ -1734,6 +1795,8 @@
     window.setActiveTab = setActiveTab;
     window.renderLoginLogs = renderLoginLogs;
     window.renderActivityLogs = renderActivityLogs;
+    window.approvePendingReservation = approvePendingReservation;
+    window.rejectPendingReservation = rejectPendingReservation;
 
     if (document.readyState === 'loading') {
       window.addEventListener('DOMContentLoaded', initApp);

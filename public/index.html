@@ -58,7 +58,7 @@
         import {
             getFirestore, collection, doc, setDoc, getDoc, getDocs, deleteDoc,
             onSnapshot, query, orderBy, runTransaction, serverTimestamp,
-            writeBatch, where, limit, addDoc, arrayUnion
+            writeBatch, where, limit, addDoc, arrayUnion, updateDoc
         } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
         import {
             getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged,
@@ -1167,6 +1167,7 @@
             const bookingData = await openBookingModal({ hour, room });
             if (bookingData === null) return;
 
+            const isPendingFlow = !isAdmin();
             const resData = {
                 teamId: team.id, teamName: team.name,
                 userName: bookingData.userName || currentUser.displayName,
@@ -1174,6 +1175,7 @@
                 lessonName: bookingData.lessonName,
                 note: bookingData.note,
                 memo: bookingData.memo,
+                status: isPendingFlow ? 'pending' : 'approved',
             };
 
             const docRef = doc(db, `reservations/${currentWeekId}/${activeDay}`, key);
@@ -1184,9 +1186,13 @@
                     tx.set(docRef, { ...resData, createdAt: serverTimestamp() });
                 });
                 await addActivityLog('예약_생성', `${activeDay} ${hour} ${room}`, null, resData);
-                notifyTeamLead(team.id, '새 예약', `${activeDay} ${hour} ${room}`);
-                showToast(`${team.name} 예약 완료!`, 'success');
-                syncGoogleSheets('reserve', activeDay, hour, room, team.name, currentUser.displayName, resData.note);
+                if (isPendingFlow) {
+                    showToast(`${team.name} 예약 신청 완료! 담당자 승인 후 확정됩니다.`, 'info');
+                } else {
+                    notifyTeamLead(team.id, '새 예약', `${activeDay} ${hour} ${room}`);
+                    showToast(`${team.name} 예약 완료!`, 'success');
+                    syncGoogleSheets('reserve', activeDay, hour, room, team.name, currentUser.displayName, resData.note);
+                }
             } catch (e) { showToast(e.message || '예약 실패', 'error'); }
         }
 
@@ -1410,19 +1416,20 @@
             const hours = [];
             for (let h = startH; h < endH; h++) hours.push(`${String(h).padStart(2,'0')}:00`);
 
+            const isPendingFlow = !isAdmin();
             const skipped = [];
             for (const hour of hours) {
                 const key = `${hour}-${room}`.replace(/\//g, '_');
                 if (reservations[key]) { skipped.push(hour); continue; }
-                const resData = { teamId: team.id, teamName: team.name, userName: userName || currentUser.displayName, userId: currentUser.id, isFixed: false, lessonName, note, memo };
+                const resData = { teamId: team.id, teamName: team.name, userName: userName || currentUser.displayName, userId: currentUser.id, isFixed: false, lessonName, note, memo, status: isPendingFlow ? 'pending' : 'approved' };
                 await setDoc(doc(db, `reservations/${currentWeekId}/${activeDay}`, key), { ...resData, createdAt: serverTimestamp() });
                 await addActivityLog('예약_등록', `${activeDay} ${hour} ${room}`, null, resData);
-                syncGoogleSheets('reserve', activeDay, hour, room, team.name, userName || currentUser.displayName, note);
+                if (!isPendingFlow) syncGoogleSheets('reserve', activeDay, hour, room, team.name, userName || currentUser.displayName, note);
             }
 
-            if (skipped.length > 0) showToast(`${hours.length - skipped.length}개 등록, ${skipped.length}개 건너뜀 (이미 예약됨)`, 'info');
-            else showToast(`${hours.length}개 시간대 예약 완료.`, 'success');
-            notifyTeamLead(team.id, '범위 예약', `${activeDay} ${hours[0]}~${HOURS[HOURS.indexOf(hours[hours.length-1])+1]||''} ${room}`);
+            if (skipped.length > 0) showToast(`${hours.length - skipped.length}개 등록, ${skipped.length}개 건너뜀 (이미 예약됨)${isPendingFlow ? ' — 담당자 승인 후 확정됩니다.' : ''}`, 'info');
+            else showToast(isPendingFlow ? `${hours.length}개 시간대 예약 신청 완료! 담당자 승인 후 확정됩니다.` : `${hours.length}개 시간대 예약 완료.`, 'success');
+            if (!isPendingFlow) notifyTeamLead(team.id, '범위 예약', `${activeDay} ${hours[0]}~${HOURS[HOURS.indexOf(hours[hours.length-1])+1]||''} ${room}`);
         }
         window.showRangeReserveModal = showRangeReserveModal;
 
@@ -1806,8 +1813,10 @@
                     <p class="text-[11px] text-amber-700 font-mono mt-0.5">${applicantUser.phone ? esc(applicantUser.phone) : '연락처 없음'}</p>
                 </div>` : '';
 
+            const isPendingRes = res.status === 'pending';
             content.innerHTML = `
                 <div class="p-5 border-b border-slate-100">
+                    ${isPendingRes ? `<div class="flex items-center gap-2 mb-3 px-3 py-2 bg-orange-50 border border-orange-200 rounded-lg text-xs font-bold text-orange-600"><i data-lucide="hourglass" class="w-3.5 h-3.5"></i> 담당자 승인 대기 중${admin ? ` — <button onclick="approvePendingFromDetail('${hour}','${room}','${key}')" class="underline hover:no-underline">승인</button> · <button onclick="rejectPendingFromDetail('${hour}','${room}','${key}')" class="underline hover:no-underline text-red-500">거절</button>` : ''}</div>` : ''}
                     <div class="flex items-start justify-between gap-3">
                         <div>
                             <p class="text-[11px] font-bold text-teal-600 mb-1">${DAYS.find(d => d.id === activeDay)?.fullLabel || activeDay} · ${esc(hour)} · ${esc(room)}</p>
@@ -2007,7 +2016,9 @@
                         td.style.verticalAlign = 'top';
                     }
                     const res = reservations[key];
-                    if (res) {
+                    const isPending = res?.status === 'pending';
+                    const canSeePending = isPending && (isAdmin() || (currentUser && currentUser.id === res?.userId));
+                    if (res && (!isPending || canSeePending)) {
                         const team = getTeam(res.teamId);
                         let displayName = res.lessonName || res.teamName;
                         if (!res.lessonName) {
@@ -2015,8 +2026,14 @@
                         }
                         const mergeCount = span?.rowspan || 1;
                         const minH = `min-height:${mergeCount > 1 ? mergeCount * 54 - 4 : 46}px;`;
-                        const titleAttr = `${res.teamName}${res.isFixed ? ' [고정]' : ''}${res.strikethrough ? ' [예약중]' : ''}\n분류: ${team ? (team.fullType || '활동단') : '기타(정규 시간표)'}\n예약자: ${res.userName || ''}${res.note ? `\n메모: ${res.note}` : ''}${res.sheetColor ? `\n시트색: ${res.sheetColor}` : ''}`;
-                        if (res.strikethrough) {
+                        const titleAttr = `${res.teamName}${res.isFixed ? ' [고정]' : ''}${res.strikethrough ? ' [예약중]' : ''}${isPending ? ' [승인대기]' : ''}\n분류: ${team ? (team.fullType || '활동단') : '기타(정규 시간표)'}\n예약자: ${res.userName || ''}${res.note ? `\n메모: ${res.note}` : ''}${res.sheetColor ? `\n시트색: ${res.sheetColor}` : ''}`;
+                        if (isPending) {
+                            td.innerHTML = `<button type="button" onclick="openReservationDetails('${hour}','${room}')" class="w-full flex flex-col justify-center items-center px-0.5 py-1 rounded-lg border-2 border-dashed shadow-sm relative group transition-all hover:shadow-md hover:-translate-y-0.5 border-orange-300" style="background:#fff7ed;${minH}" title="${esc(titleAttr)}">
+                                <span class="text-[9px] font-bold text-orange-500 flex items-center gap-0.5 leading-none mb-0.5"><i data-lucide="hourglass" class="w-2.5 h-2.5"></i> 승인 대기</span>
+                                <span class="text-[10px] font-bold text-center w-full break-words leading-tight px-0.5 text-orange-700">${esc(displayName)}</span>
+                                <span class="text-[9px] text-orange-400 mt-0.5 break-words w-full text-center px-0.5 leading-tight">${esc(res.userName || '')}</span>
+                            </button>`;
+                        } else if (res.strikethrough) {
                             td.innerHTML = `<button type="button" onclick="openReservationDetails('${hour}','${room}')" class="w-full flex flex-col justify-center items-center px-0.5 py-1 rounded-lg border-2 shadow-sm relative group transition-all hover:shadow-md hover:-translate-y-0.5 border-amber-300" style="background:#fffbeb;${minH}" title="${esc(titleAttr)}">
                                 <span class="text-[9px] font-bold text-amber-500 flex items-center gap-0.5 leading-none mb-0.5"><i data-lucide="clock" class="w-2.5 h-2.5"></i> 예약중</span>
                                 <span class="text-[10px] font-bold text-center w-full break-words leading-tight px-0.5 line-through text-slate-400">${esc(displayName)}</span>
@@ -2166,6 +2183,28 @@
         window.handleCancelClick = (h, r) => cancelReservation(h, r);
         window.openReservationDetails = (h, r) => openReservationDetails(h, r);
         window.closeReservationDetails = () => closeReservationDetails();
+
+        window.approvePendingFromDetail = async function(hour, room, key) {
+            if (!isAdmin()) return;
+            try {
+                await updateDoc(doc(db, `reservations/${currentWeekId}/${activeDay}`, key), { status: 'approved' });
+                await addActivityLog('예약_승인', `${activeDay} ${hour} ${room}`, null, null);
+                showToast('예약을 승인했습니다.', 'success');
+                closeReservationDetails();
+            } catch (e) { showToast('승인 실패: ' + e.message, 'error'); }
+        };
+
+        window.rejectPendingFromDetail = async function(hour, room, key) {
+            if (!isAdmin()) return;
+            try {
+                const resSnap = await getDoc(doc(db, `reservations/${currentWeekId}/${activeDay}`, key));
+                const resData = resSnap.data() || {};
+                await deleteDoc(doc(db, `reservations/${currentWeekId}/${activeDay}`, key));
+                await addActivityLog('예약_거절', `${activeDay} ${hour} ${room}`, null, resData);
+                showToast('예약 신청을 거절했습니다.', 'info');
+                closeReservationDetails();
+            } catch (e) { showToast('거절 실패: ' + e.message, 'error'); }
+        };
 
         window.setLogFilter = function(filter) {
             logFilter = filter;
