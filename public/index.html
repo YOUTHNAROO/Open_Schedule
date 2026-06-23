@@ -812,7 +812,7 @@
             });
         }
 
-        function promptPushPermission() {
+        window.promptPushPermission = function promptPushPermission() {
             if (!window.__osPushOk) {
                 showToast('푸시 알림을 현재 사용할 수 없습니다. 페이지를 새로고침 후 다시 시도하세요.', 'error');
                 return;
