@@ -43,9 +43,10 @@
 
 <script type="module">
   import { requireLoginOrRedirect, subscribeFeed, loadBoards, canAccessBoard, getPostImages, fetchFeedPage, subscribeNotifications, syncMyNotifications, toggleLike } from './community-data.js?v=9';
-  import { postCardHTML, emptyHTML, imageGridHTML, esc, toast } from './community-ui.js?v=9';
+  import { postCardHTML, emptyHTML, imageGridHTML, esc, toast, mountOnlineBadge } from './community-ui.js?v=9';
 
   const me = await requireLoginOrRedirect();
+  mountOnlineBadge();
 
   // 관리자에게만 관리 콘솔 진입 버튼 노출
   if (me?.isAdmin) {

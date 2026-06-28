@@ -130,9 +130,10 @@
 
 <script type="module">
   import { requireLoginOrRedirect, subscribeMeetups, createMeetup, toggleMeetupJoin, deleteMeetup, getUserNickname } from './community-data.js?v=9';
-  import { esc, toast, emptyHTML } from './community-ui.js?v=9';
+  import { esc, toast, emptyHTML, linkify, mountOnlineBadge } from './community-ui.js?v=9';
 
   const me = await requireLoginOrRedirect();
+  mountOnlineBadge();
   const myUid = me.uid;
   const $ = id => document.getElementById(id);
   const listEl = $('meetupList');
@@ -184,7 +185,7 @@
         ${m.time ? `<span>${CLOCK}${esc(m.time)}${m.endAt ? ' · ' + esc(endLabel(m)) : ''}</span>` : ''}
         ${m.location ? `<span>${PIN}${esc(m.location)}</span>` : ''}
       </div>
-      ${m.description ? `<p style="font-size:13px;line-height:1.55;color:var(--muted);margin-top:8px;white-space:pre-line">${esc(m.description)}</p>` : ''}
+      ${m.description ? `<p style="font-size:13px;line-height:1.55;color:var(--muted);margin-top:8px;white-space:pre-line" class="mc-desc">${linkify(esc(m.description))}</p>` : ''}
       <div class="mc-parts">
         <div class="mc-avs">${avatarsHTML(parts)}</div>
         <div class="mc-names">${esc(namesText(parts))}</div>

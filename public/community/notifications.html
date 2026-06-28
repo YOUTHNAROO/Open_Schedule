@@ -41,9 +41,10 @@
 
 <script type="module">
   import { requireLoginOrRedirect, subscribeNotifications, markAllNotificationsRead, syncMyNotifications } from './community-data.js?v=9';
-  import { esc, timeAgo, toast, emptyHTML } from './community-ui.js?v=9';
+  import { esc, timeAgo, toast, emptyHTML, mountOnlineBadge } from './community-ui.js?v=9';
 
   await requireLoginOrRedirect();
+  mountOnlineBadge();
   syncMyNotifications().catch(() => {}); // 진입 시 내 글·번개 변화 동기화
 
   const listEl = document.getElementById('nfList');

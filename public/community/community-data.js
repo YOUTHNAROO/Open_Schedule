@@ -739,6 +739,77 @@ export async function leaveChat(roomId) {
   try { await updateDoc(doc(db, 'chat_rooms', roomId), { status: 'ended' }); } catch {}
 }
 
+// 메시지 createdAt(Firestore Timestamp 등) → ms
+function _tsToMs(ts) {
+  if (!ts) return 0;
+  if (ts.toMillis) return ts.toMillis();
+  if (ts.seconds) return ts.seconds * 1000;
+  return +new Date(ts) || 0;
+}
+export const CHAT_EDIT_WINDOW_MS = 30000; // 메시지 수정/삭제 유효시간(30초)
+
+/** 메시지 수정 — 작성자 본인 + 전송 후 30초 이내. */
+export async function editChatMessage(roomId, msgId, text) {
+  const u = await requireUser();
+  text = (text || '').trim().slice(0, 500);
+  if (!text) throw new Error('내용을 입력하세요.');
+  const ref = doc(db, `chat_rooms/${roomId}/messages`, msgId);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) throw new Error('메시지를 찾을 수 없어요.');
+  const m = snap.data();
+  if (m.senderUid !== u.uid) throw new Error('본인 메시지만 수정할 수 있어요.');
+  if (m.deleted) throw new Error('삭제된 메시지예요.');
+  const created = _tsToMs(m.createdAt);
+  if (created && Date.now() - created > CHAT_EDIT_WINDOW_MS) throw new Error('수정 가능 시간(30초)이 지났어요.');
+  await updateDoc(ref, { text, editedAt: serverTimestamp() });
+}
+
+/** 메시지 삭제(소프트) — 작성자 본인 + 30초 이내. */
+export async function deleteChatMessage(roomId, msgId) {
+  const u = await requireUser();
+  const ref = doc(db, `chat_rooms/${roomId}/messages`, msgId);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return;
+  const m = snap.data();
+  if (m.senderUid !== u.uid) throw new Error('본인 메시지만 삭제할 수 있어요.');
+  const created = _tsToMs(m.createdAt);
+  if (created && Date.now() - created > CHAT_EDIT_WINDOW_MS) throw new Error('삭제 가능 시간(30초)이 지났어요.');
+  await updateDoc(ref, { deleted: true, text: '', deletedAt: serverTimestamp() });
+}
+
+/** 채팅 읽음 처리 — 방에 내 마지막 읽은 시각 기록(상대 메시지의 '읽음 시각' 표시용). */
+export async function markChatRead(roomId) {
+  const u = await requireUser();
+  try { await updateDoc(doc(db, 'chat_rooms', roomId), { [`reads.${u.uid}`]: serverTimestamp() }); } catch {}
+}
+
+/* ─────────────────────────── 커뮤니티 접속자(presence) ─────────────────────────── */
+let _presenceTimer = null;
+/** 커뮤니티 접속 하트비트 시작(모든 페이지 상단 접속자 수 표시용). */
+export async function startPresence() {
+  const u = await getCurrentUser(); if (!u) return;
+  const ref = doc(db, 'community_presence', u.uid);
+  const beat = () => setDoc(ref, { uid: u.uid, lastSeen: serverTimestamp() }, { merge: true }).catch(() => {});
+  beat();
+  if (_presenceTimer) clearInterval(_presenceTimer);
+  _presenceTimer = setInterval(beat, 20000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) beat(); });
+  window.addEventListener('beforeunload', () => { try { deleteDoc(ref); } catch {} });
+}
+/** 최근 45초 내 활동한 접속자 수 구독. cb(count). */
+export function subscribeOnlineCount(cb) {
+  const WINDOW = 45000;
+  let latest = [];
+  const recount = () => cb(latest.filter(ms => Date.now() - ms < WINDOW).length || 0);
+  const unsub = onSnapshot(collection(db, 'community_presence'), snap => {
+    latest = snap.docs.map(d => _tsToMs(d.data().lastSeen));
+    recount();
+  });
+  // 하트비트가 없어도 만료된 접속자를 주기적으로 반영
+  const iv = setInterval(recount, 15000);
+  return () => { unsub(); clearInterval(iv); };
+}
+
 /* ── 1:1 채팅 로그 열람 (최고관리자 전용) ──────────────────────────────
  * 모든 대화는 chat_rooms/{roomId}/messages 에 영구 보존된다(leaveChat 은 status 만 변경).
  * 아래 함수는 role==='superadmin' 일 때만 동작하는 클라이언트 측 게이트다.

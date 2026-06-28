@@ -226,7 +226,15 @@ service cloud.firestore {
         allow create: if isSignedIn()
           && request.resource.data.senderUid == request.auth.uid
           && request.auth.uid in get(/databases/$(database)/documents/chat_rooms/$(roomId)).data.participants;
+        // 본인 메시지 수정/삭제(소프트삭제) — 작성자만. 30초 제한은 클라이언트에서 게이트.
+        allow update: if isSignedIn() && resource.data.senderUid == request.auth.uid;
       }
+    }
+
+    // 커뮤니티 접속자(presence) — 본인 문서만 쓰기, 로그인 사용자 읽기(접속자 수 표시)
+    match /community_presence/{uid} {
+      allow read:  if isSignedIn();
+      allow write: if isSignedIn() && request.auth.uid == uid;
     }
   }
 }

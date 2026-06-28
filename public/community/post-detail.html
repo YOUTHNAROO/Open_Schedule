@@ -85,9 +85,10 @@
     requireLoginOrRedirect, getPost, getPostImages, subscribeComments, addComment,
     toggleLike, hasLiked, toggleScrap, toggleCommentLike, reportPost, boardName, ensureBoardsLoaded
   } from './community-data.js?v=9';
-  import { avatarHTML, imageGridHTML, authorLabel, timeAgo, esc, toast, linkify } from './community-ui.js?v=9';
+  import { avatarHTML, imageGridHTML, authorLabel, timeAgo, esc, toast, linkify, mountOnlineBadge } from './community-ui.js?v=9';
 
   await requireLoginOrRedirect();
+  mountOnlineBadge();
   await ensureBoardsLoaded();
   const $ = id => document.getElementById(id);
   const postId = new URLSearchParams(location.search).get('id');

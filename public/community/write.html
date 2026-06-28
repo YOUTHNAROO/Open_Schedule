@@ -108,9 +108,10 @@
 
 <script type="module">
   import { requireLoginOrRedirect, createPost, loadBoards, boardName, isAnonOnly, boardExists, boardFeature, canAccessBoard } from './community-data.js?v=9';
-  import { toast, esc } from './community-ui.js?v=9';
+  import { toast, esc, mountOnlineBadge } from './community-ui.js?v=9';
 
   const me = await requireLoginOrRedirect();
+  mountOnlineBadge();
 
   const $ = id => document.getElementById(id);
   const CHEVRON = ' <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>';

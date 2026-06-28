@@ -111,9 +111,10 @@
     getPostReports, getCommunityAuditLogs, deanonymizePost, adminSetPostStatus,
     adminDeletePost, boardName, getChatRoomsForAdmin, getChatMessagesForAdmin
   } from './community-data.js?v=9';
-  import { esc, timeAgo, toast, emptyHTML } from './community-ui.js?v=9';
+  import { esc, timeAgo, toast, emptyHTML, mountOnlineBadge } from './community-ui.js?v=9';
 
   const me = await requireLoginOrRedirect();
+  mountOnlineBadge();
   const $ = id => document.getElementById(id);
   if (!me.isAdmin) {
     document.querySelector('.admin-body').innerHTML = emptyHTML('관리자 전용 페이지입니다.');

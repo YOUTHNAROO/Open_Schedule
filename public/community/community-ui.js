@@ -2,7 +2,23 @@
  * 커뮤니티 공용 UI 헬퍼 — 렌더 함수 + 토스트 + 시간표시.
  * community-data.js(데이터 레이어) 위에서 동작. 디자인 클래스는 assets/everytime.css 사용.
  */
-import { BOARDS, boardName, authorLabel } from './community-data.js?v=9';
+import { BOARDS, boardName, authorLabel, startPresence, subscribeOnlineCount } from './community-data.js?v=9';
+
+/** 상단 헤더에 '접속자 N명' 배지를 띄우고 실시간 갱신(모든 커뮤니티 페이지 공용). */
+let _onlineMounted = false;
+export function mountOnlineBadge() {
+  if (_onlineMounted) return; _onlineMounted = true;
+  const head = document.querySelector('.pagehead') || document.querySelector('.topbar-row') || document.querySelector('.topbar');
+  if (!head) return;
+  const badge = document.createElement('span');
+  badge.id = 'onlineBadge';
+  badge.style.cssText = 'display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:800;color:var(--success,#16a34a);background:#f0fdf4;padding:4px 9px;border-radius:999px;white-space:nowrap';
+  badge.innerHTML = '<span style="width:6px;height:6px;border-radius:50%;background:var(--success,#16a34a);display:inline-block"></span><b class="od-n">·</b>명 접속';
+  const spacer = head.querySelector('.spacer');
+  if (spacer) head.insertBefore(badge, spacer); else head.appendChild(badge);
+  try { startPresence(); } catch {}
+  try { subscribeOnlineCount(n => { const el = badge.querySelector('.od-n'); if (el) el.textContent = n; }); } catch {}
+}
 
 export const ANON_SVG = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C7 2 4 6 4 11c0 3 2 5 4 6 0 2 2 5 4 5s4-3 4-5c2-1 4-3 4-6 0-5-3-9-8-9Zm-3 9a1.4 1.4 0 1 1 0-2.8 1.4 1.4 0 0 1 0 2.8Zm6 0a1.4 1.4 0 1 1 0-2.8 1.4 1.4 0 0 1 0 2.8Z"/></svg>';
 const HEART = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>';

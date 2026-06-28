@@ -18,6 +18,18 @@
   .msg{max-width:74%;padding:9px 13px;border-radius:15px;font-size:14px;line-height:1.5;word-break:break-word}
   .msg.them{align-self:flex-start;background:#fff;border:1px solid var(--border);border-bottom-left-radius:5px}
   .msg.me{align-self:flex-end;background:var(--primary);color:#fff;border-bottom-right-radius:5px}
+  .msg.deleted{font-style:italic;opacity:.6}
+  .msg a{color:inherit;text-decoration:underline;text-underline-offset:2px}
+  .msg .edited{font-size:10.5px;opacity:.7;margin-left:4px}
+  .mrow{display:flex;flex-direction:column;max-width:80%}
+  .mrow.me{align-self:flex-end;align-items:flex-end}
+  .mrow.them{align-self:flex-start;align-items:flex-start}
+  .mrow .msg{max-width:100%}
+  .mmeta{font-size:10.5px;color:var(--faint);margin:2px 4px 0;display:flex;align-items:center;gap:7px}
+  .mmeta .read{color:var(--anon);font-weight:700}
+  .mmeta button{border:0;background:transparent;color:var(--muted);font-size:11px;font-weight:700;cursor:pointer;padding:0}
+  .mmeta button:hover{color:var(--primary)}
+  .mmeta .cdown{color:var(--danger);font-weight:700;font-variant-numeric:tabular-nums}
   .sys{align-self:center;font-size:11.5px;color:var(--faint);background:rgba(15,23,42,.05);padding:5px 11px;border-radius:999px;margin:4px 0}
   .chat-bar{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:var(--maxw);background:rgba(255,255,255,.97);backdrop-filter:blur(14px);border-top:1px solid var(--border);padding:9px 12px max(9px,env(safe-area-inset-bottom));z-index:40;display:flex;align-items:center;gap:9px}
   .chat-input{flex:1;border:1.5px solid var(--border);border-radius:999px;background:var(--secondary);padding:10px 14px;font-size:14px;font-family:inherit;outline:none}
@@ -48,15 +60,21 @@
 </div>
 
 <script type="module">
-  import { requireLoginOrRedirect, startMatch, waitForMatch, cancelMatch, subscribeChat, subscribeChatRoom, sendChatMessage, leaveChat } from './community-data.js?v=9';
-  import { esc, toast } from './community-ui.js?v=9';
+  import { requireLoginOrRedirect, startMatch, waitForMatch, cancelMatch, subscribeChat, subscribeChatRoom, sendChatMessage, leaveChat, editChatMessage, deleteChatMessage, markChatRead, CHAT_EDIT_WINDOW_MS } from './community-data.js?v=9';
+  import { esc, toast, linkify, mountOnlineBadge } from './community-ui.js?v=9';
 
   const me = await requireLoginOrRedirect();
+  mountOnlineBadge();
   const $ = id => document.getElementById(id);
   const body = $('chatBody');
   let roomId = null, unsubMsg = null, unsubRoom = null, unsubWait = null, ended = false;
+  let curMsgs = [], curRoom = null, tickTimer = null;
 
-  function cleanup() { if (unsubMsg) unsubMsg(); if (unsubRoom) unsubRoom(); if (unsubWait) unsubWait(); unsubMsg = unsubRoom = unsubWait = null; }
+  function cleanup() { if (unsubMsg) unsubMsg(); if (unsubRoom) unsubRoom(); if (unsubWait) unsubWait(); unsubMsg = unsubRoom = unsubWait = null; if (tickTimer) { clearInterval(tickTimer); tickTimer = null; } }
+
+  const pad = n => String(n).padStart(2, '0');
+  const tsMs = ts => ts ? (ts.toMillis ? ts.toMillis() : (ts.seconds ? ts.seconds * 1000 : +new Date(ts))) : 0;
+  const hhmm = ms => { const d = new Date(ms); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
 
   function showSearching() {
     $('chatBar').style.display = 'none'; $('leaveBtn').style.display = 'none';
@@ -75,12 +93,76 @@
   }
 
   function renderMessages(msgs) {
-    const sys = body.querySelector('.sys');
-    const head = sys ? sys.outerHTML : '<div class="sys">상대와 연결됐어요. 서로를 존중하는 대화를 해주세요 🙂</div>';
-    body.innerHTML = head + msgs.map(m =>
-      `<div class="msg ${m.senderUid === me.uid ? 'me' : 'them'}">${esc(m.text)}</div>`).join('');
+    if (Array.isArray(msgs)) curMsgs = msgs;
+    const head = '<div class="sys">상대와 연결됐어요. 서로를 존중하는 대화를 해주세요 🙂</div>';
+    const otherUid = (curRoom?.participants || []).find(p => p !== me.uid);
+    const otherReadMs = tsMs(curRoom?.reads?.[otherUid]);
+    // 내 메시지 중 '읽음'된 마지막 메시지에만 읽음 시각 표시
+    let lastReadMyId = null;
+    for (const m of curMsgs) {
+      if (m.senderUid === me.uid && !m.deleted && otherReadMs && tsMs(m.createdAt) <= otherReadMs) lastReadMyId = m.id;
+    }
+    const now = Date.now();
+    const rows = curMsgs.map(m => {
+      const mine = m.senderUid === me.uid;
+      const created = tsMs(m.createdAt);
+      const inWindow = mine && !m.deleted && created && (now - created < CHAT_EDIT_WINDOW_MS);
+      const remain = inWindow ? Math.ceil((CHAT_EDIT_WINDOW_MS - (now - created)) / 1000) : 0;
+      const textHtml = m.deleted ? '삭제된 메시지' : linkify(esc(m.text));
+      const edited = m.editedAt && !m.deleted ? '<span class="edited">(수정됨)</span>' : '';
+      const metaBits = [];
+      if (mine && m.id === lastReadMyId) metaBits.push(`<span class="read">읽음 ${hhmm(otherReadMs)}</span>`);
+      if (inWindow) {
+        metaBits.push(`<button data-edit="${esc(m.id)}">수정</button>`);
+        metaBits.push(`<button data-del="${esc(m.id)}">삭제</button>`);
+        metaBits.push(`<span class="cdown" data-cd="${esc(m.id)}">${remain}s</span>`);
+      }
+      const meta = metaBits.length ? `<div class="mmeta">${metaBits.join('')}</div>` : '';
+      return `<div class="mrow ${mine ? 'me' : 'them'}" data-id="${esc(m.id)}">
+        <div class="msg ${mine ? 'me' : 'them'}${m.deleted ? ' deleted' : ''}">${textHtml}${edited}</div>${meta}
+      </div>`;
+    }).join('');
+    body.innerHTML = head + rows;
     body.scrollTop = body.scrollHeight;
+    // 30초 카운트다운/만료 처리용 1초 틱
+    if (!tickTimer) tickTimer = setInterval(tick, 1000);
   }
+
+  // 1초마다 남은 시간 갱신, 윈도우 만료 시 버튼 제거(전체 재렌더)
+  function tick() {
+    const now = Date.now();
+    let anyActive = false, needRerender = false;
+    for (const m of curMsgs) {
+      if (m.senderUid !== me.uid || m.deleted || !m.createdAt) continue;
+      const created = tsMs(m.createdAt);
+      const remain = CHAT_EDIT_WINDOW_MS - (now - created);
+      if (remain > 0) {
+        anyActive = true;
+        const el = body.querySelector(`.cdown[data-cd="${m.id}"]`);
+        if (el) el.textContent = `${Math.ceil(remain / 1000)}s`;
+        else needRerender = true; // 버튼이 아직 없는데 윈도우 내 → 재렌더
+      } else {
+        if (body.querySelector(`.cdown[data-cd="${m.id}"]`)) needRerender = true; // 만료된 버튼 제거
+      }
+    }
+    if (needRerender) renderMessages();
+    if (!anyActive) { clearInterval(tickTimer); tickTimer = null; }
+  }
+
+  // 수정/삭제 (위임)
+  body.addEventListener('click', async (e) => {
+    const ed = e.target.closest('[data-edit]'); const dl = e.target.closest('[data-del]');
+    if (ed) {
+      const id = ed.dataset.edit; const m = curMsgs.find(x => x.id === id); if (!m) return;
+      const next = prompt('메시지 수정 (30초 이내)', m.text);
+      if (next == null) return;
+      try { await editChatMessage(roomId, id, next); } catch (err) { toast(err.message || '수정 실패'); }
+    } else if (dl) {
+      const id = dl.dataset.del;
+      if (!confirm('이 메시지를 삭제할까요?')) return;
+      try { await deleteChatMessage(roomId, id); } catch (err) { toast(err.message || '삭제 실패'); }
+    }
+  });
 
   function onEnded(msg) {
     if (ended) return; ended = true;
@@ -99,8 +181,11 @@
     if (roomId) return; roomId = id; ended = false;
     if (unsubWait) { unsubWait(); unsubWait = null; }
     showChat();
-    unsubMsg = subscribeChat(id, renderMessages);
-    unsubRoom = subscribeChatRoom(id, room => { if (room && room.status === 'ended') onEnded('상대가 대화를 종료했어요.'); });
+    unsubMsg = subscribeChat(id, msgs => { renderMessages(msgs); markChatRead(id); });
+    unsubRoom = subscribeChatRoom(id, room => {
+      if (room && room.status === 'ended') onEnded('상대가 대화를 종료했어요.');
+      curRoom = room; renderMessages(); // 상대 읽음 시각 반영
+    });
   }
 
   async function begin() {

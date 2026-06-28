@@ -95,9 +95,10 @@
 
 <script type="module">
   import { requireLoginOrRedirect, loadBoards, ensureBoardsSeeded, createBoard, updateBoard, deleteBoard, getBoardPostCount, getTeams, canAccessBoard } from './community-data.js?v=9';
-  import { esc, toast } from './community-ui.js?v=9';
+  import { esc, toast, mountOnlineBadge } from './community-ui.js?v=9';
 
   const me = await requireLoginOrRedirect();
+  mountOnlineBadge();
   const $ = id => document.getElementById(id);
 
   const DESC_DEFAULT = { free:'무엇이든 자유롭게', secret:'익명 전용 · 더 솔직하게', info:'꿀팁·공지·자료 공유', review:'별점·후기 아카이브', meetup:'지금 시간 비는 사람 모집', flex:'이번 시즌 시간표 공유' };
