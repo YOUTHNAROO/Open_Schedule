@@ -4,7 +4,7 @@ import { app, auth, db, doc, getDoc, initializeApp, getAuth, deleteApp,
     reauthenticateWithCredential, updatePassword } from './firebase.js';
 import { supabase, dbGet, dbInsert, dbUpdate, dbDelete } from './supabase.js';
 import S from './state.js';
-import { esc, isAdmin, formatPhone } from './utils.js';
+import { esc, isAdmin, formatPhone, koErr } from './utils.js';
 import { hashAnswer, encryptPassword, decryptPassword } from './crypto.js';
 import { showToast, showModal, hideModal, showConfirm } from './ui.js';
 import { addLoginLog } from './logging.js';
@@ -336,7 +336,7 @@ async function handleRegister(e) {
         switchLoginTab('login');
         document.getElementById('login-username').value = username;
     } catch(err) {
-        showErr(err.code === 'auth/email-already-in-use' ? '이미 사용 중인 아이디입니다.' : (err.message || '오류가 발생했습니다.'));
+        showErr(koErr(err));
     } finally {
         try { if (secApp) await deleteApp(secApp); } catch {}
         btn.disabled = false; btn.textContent = '회원가입';
@@ -363,7 +363,7 @@ async function handleRecovery1(e) {
         document.getElementById('rec-question-text').textContent = _recoveryData.securityQuestion;
         document.getElementById('rec-step1').classList.add('hidden');
         document.getElementById('rec-step2').classList.remove('hidden');
-    } catch(err) { errEl.textContent = '오류: ' + err.message; errEl.classList.remove('hidden'); }
+    } catch(err) { errEl.textContent = koErr(err); errEl.classList.remove('hidden'); }
     finally { btn.disabled = false; }
 }
 
@@ -382,7 +382,7 @@ async function handleRecovery2(e) {
         document.getElementById('rec-step2').classList.add('hidden');
         document.getElementById('rec-step3').classList.remove('hidden');
     } catch(err) {
-        errEl.textContent = '오류가 발생했습니다: ' + (err.message || err);
+        errEl.textContent = koErr(err);
         errEl.classList.remove('hidden');
     } finally { btn.disabled = false; }
 }
@@ -466,7 +466,7 @@ async function handlePasswordChange(e) {
         document.getElementById('chpw-form')?.reset();
     } catch(err) {
         const map = { 'auth/invalid-credential':'현재 비밀번호가 올바르지 않습니다.', 'auth/wrong-password':'현재 비밀번호가 올바르지 않습니다.' };
-        errEl.textContent = map[err.code] || err.message;
+        errEl.textContent = map[err.code] || koErr(err);
         errEl.classList.remove('hidden');
     } finally { btn.disabled = false; }
 }

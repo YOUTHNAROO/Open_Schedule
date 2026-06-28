@@ -94,4 +94,32 @@ function formatPhone(raw) {
     return raw; // 알 수 없는 길이는 그대로
 }
 
-export { getWeekId, getTeam, isAdmin, esc, isValidHexColor, normalizeColor, getTextColorForBg, getWeekDateRange, getWeeksInMonth, formatWeekLabel, formatPhone };
+// 모든 에러를 한국어 사용자 메시지로 변환. Firebase Auth 코드 + Supabase/PostgREST + 네트워크.
+function koErr(e) {
+    const code = (e && e.code) || '';
+    const msg = String((e && e.message) || e || '');
+    const map = {
+        'auth/email-already-in-use': '이미 사용 중인 아이디입니다.',
+        'auth/invalid-credential': '아이디 또는 비밀번호가 올바르지 않습니다.',
+        'auth/wrong-password': '비밀번호가 올바르지 않습니다.',
+        'auth/user-not-found': '등록되지 않은 사용자입니다.',
+        'auth/too-many-requests': '시도가 너무 많아 잠시 잠겼습니다. 잠시 후 다시 시도해주세요.',
+        'auth/network-request-failed': '네트워크 오류입니다. 인터넷 연결을 확인해주세요.',
+        'auth/user-disabled': '비활성화된 계정입니다. 관리자에게 문의하세요.',
+        'auth/weak-password': '비밀번호는 6자 이상이어야 합니다.',
+        'auth/invalid-email': '아이디 형식이 올바르지 않습니다.',
+        'auth/missing-password': '비밀번호를 입력해주세요.',
+        'auth/requires-recent-login': '보안을 위해 다시 로그인한 뒤 시도해주세요.',
+        'auth/popup-closed-by-user': '인증 창이 닫혔습니다. 다시 시도해주세요.',
+    };
+    if (map[code]) return map[code];
+    if (/duplicate key|already exists|23505/i.test(msg)) return '이미 존재하는 데이터입니다.';
+    if (/row-level security|permission denied|not authorized|JWT|401|403/i.test(msg)) return '권한이 없습니다. 다시 로그인한 뒤 시도해주세요.';
+    if (/Could not find the .* column|schema cache|PGRST/i.test(msg)) return '데이터 처리 중 오류가 발생했습니다. 관리자에게 문의하세요.';
+    if (/Failed to fetch|NetworkError|network|ERR_|timeout/i.test(msg)) return '네트워크 오류입니다. 연결 상태를 확인해주세요.';
+    if (/미배포|admin-auth/i.test(msg)) return '서버 기능이 아직 준비되지 않았습니다. 관리자에게 문의하세요.';
+    if (/[가-힣]/.test(msg)) return msg;          // 이미 한국어면 그대로
+    return '오류가 발생했습니다. 잠시 후 다시 시도해주세요.';
+}
+
+export { getWeekId, getTeam, isAdmin, esc, isValidHexColor, normalizeColor, getTextColorForBg, getWeekDateRange, getWeeksInMonth, formatWeekLabel, formatPhone, koErr };

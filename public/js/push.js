@@ -1,4 +1,5 @@
 import S from './state.js';
+import { auth } from './firebase.js';
 
 // ==================== ONESIGNAL PUSH ====================
 // Init happens in the non-module <script> in <head>. Here we only login after auth.
@@ -24,22 +25,18 @@ function promptPushPermission() {
 }
 window.promptPushPermission = promptPushPermission;
 
+// 보안: OneSignal REST 키는 클라이언트에 두지 않는다. 서버(Edge Function)에서만 발송.
+// 로그인 사용자의 Firebase idToken으로 인증한다.
 async function sendOnesignalPush(externalUserIds, title, body) {
-    if (!externalUserIds?.length || ONESIGNAL_REST_API_KEY === 'YOUR_ONESIGNAL_REST_KEY') return;
+    if (!externalUserIds?.length) return;
     try {
-        await fetch('https://onesignal.com/api/v1/notifications', {
+        const user = auth.currentUser;
+        if (!user) return;
+        const idToken = await user.getIdToken();
+        await fetch(`${window.ENV.SUPABASE_URL}/functions/v1/admin-auth`, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Key ${ONESIGNAL_REST_API_KEY}`
-            },
-            body: JSON.stringify({
-                app_id: ONESIGNAL_APP_ID,
-                include_aliases: { external_id: externalUserIds },
-                target_channel: 'push',
-                headings: { ko: title, en: title },
-                contents: { ko: body, en: body }
-            })
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${window.ENV.SUPABASE_ANON_KEY}` },
+            body: JSON.stringify({ action: 'sendPush', idToken, externalUserIds, title, body }),
         });
     } catch {}
 }

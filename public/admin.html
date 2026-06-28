@@ -50,11 +50,11 @@
     // Global error logging for debugging client-side errors
     window.addEventListener('error', (e) => {
       console.error('Runtime Error:', e.error || e.message);
-      if (typeof showToast !== 'undefined') showToast(`오류 발생: ${e.message}`, 'error');
+      if (typeof showToast !== 'undefined') showToast(koErr(e), 'error');
     });
     window.addEventListener('unhandledrejection', (e) => {
       console.error('Unhandled Promise Rejection:', e.reason);
-      if (typeof showToast !== 'undefined') showToast(`비동기 오류: ${e.reason?.message || e.reason}`, 'error');
+      if (typeof showToast !== 'undefined' && typeof koErr === 'function') showToast(koErr(e.reason), 'error');
     });
 
     // ========== CONSTANTS ==========
@@ -390,6 +390,31 @@
       return raw;
     }
 
+    // 모든 에러를 한국어 사용자 메시지로 변환(앱 utils.js의 koErr와 동일 규칙).
+    function koErr(e) {
+      const code = (e && e.code) || '';
+      const msg = String((e && e.message) || e || '');
+      const map = {
+        'auth/email-already-in-use': '이미 사용 중인 아이디입니다.',
+        'auth/invalid-credential': '아이디 또는 비밀번호가 올바르지 않습니다.',
+        'auth/wrong-password': '비밀번호가 올바르지 않습니다.',
+        'auth/user-not-found': '등록되지 않은 사용자입니다.',
+        'auth/too-many-requests': '시도가 너무 많아 잠시 잠겼습니다. 잠시 후 다시 시도해주세요.',
+        'auth/network-request-failed': '네트워크 오류입니다. 인터넷 연결을 확인해주세요.',
+        'auth/user-disabled': '비활성화된 계정입니다.',
+        'auth/weak-password': '비밀번호는 6자 이상이어야 합니다.',
+        'auth/invalid-email': '아이디 형식이 올바르지 않습니다.',
+      };
+      if (map[code]) return map[code];
+      if (/duplicate key|already exists|23505/i.test(msg)) return '이미 존재하는 데이터입니다.';
+      if (/row-level security|permission denied|not authorized|JWT|401|403/i.test(msg)) return '권한이 없습니다. 다시 로그인한 뒤 시도해주세요.';
+      if (/Could not find the .* column|schema cache|PGRST/i.test(msg)) return '데이터 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.';
+      if (/Failed to fetch|NetworkError|network|ERR_|timeout/i.test(msg)) return '네트워크 오류입니다. 연결 상태를 확인해주세요.';
+      if (/미배포|admin-auth|함수/i.test(msg)) return '서버 기능이 아직 준비되지 않았습니다(Edge Function 배포 필요).';
+      if (/[가-힣]/.test(msg)) return msg;
+      return '오류가 발생했습니다. 잠시 후 다시 시도해주세요.';
+    }
+
     // ========== USER CRUD (Supabase app_users + Firebase Auth 자격증명) ==========
     async function createUser({ username, displayName, name, password, role, allowedTeams, isActive, photoUrl, phone, department, userType }) {
       const email = `${username}@youthnaroo.local`;
@@ -483,6 +508,27 @@
     }
 
     // Firestore users 컬렉션 전체를 Supabase로 일괄 이관 (Bug 5)
+    // 고아 Firebase 인증계정 정리: Supabase에 없는데 Firebase Auth에만 남은 계정을 완전 삭제.
+    // (이전에 삭제됐지만 Firebase 계정이 남아 같은 아이디 생성/가입이 막히던 문제 해결)
+    window.cleanupOrphanAuth = async function () {
+      try {
+        showToast('고아 계정을 조회하는 중...', 'info');
+        const res = await callAdminAuthFn('listOrphans', {});
+        const orphans = res.orphans || [];
+        const count = res.count || orphans.length;
+        if (!count) { showToast('정리할 고아 계정이 없습니다.', 'success'); return; }
+        const names = orphans.slice(0, 30).map(o => (o.email || '').replace('@youthnaroo.local', '')).join(', ');
+        const ok = await showConfirm(
+          `Supabase에 없는 Firebase 인증 계정 ${count}개를 찾았습니다.\n\n${names}${count > 30 ? ' 외…' : ''}\n\n완전 삭제하면 같은 아이디로 새로 가입/생성할 수 있습니다. (최근 1시간 내 가입 계정은 자동 제외)\n삭제할까요?`,
+          { title: '고아 계정 정리', okText: `${count}개 완전 삭제`, danger: true }
+        );
+        if (!ok) return;
+        showToast('삭제 처리 중...', 'info');
+        const del = await callAdminAuthFn('purgeOrphans', {});
+        showToast(`${del.deleted || 0}개 고아 계정을 정리했습니다.`, 'success');
+      } catch (e) { showToast(koErr(e), 'error'); }
+    };
+
     window.bulkMigrateFirestore = async function () {
       const ok = await showConfirm(
         'Firestore의 users 컬렉션을 Supabase app_users로 일괄 이관합니다.\n이미 이관된 사용자는 건너뜁니다.\n진행할까요?',
@@ -536,7 +582,7 @@
         showToast(`이관 완료: 신규 ${migrated}명 | 이미 존재 ${skipped}명 | 실패 ${failed}명`, 'success');
         if (migrated > 0) renderUsers();
       } catch (e) {
-        showToast('이관 실패: ' + e.message, 'error');
+        showToast('이관 실패: ' + koErr(e), 'error');
       }
     };
 
@@ -760,6 +806,7 @@
           <button type="button" onclick="icRemoveTeam('${esc(tid)}')" class="opacity-60 hover:opacity-100 font-bold leading-none ml-0.5">&times;</button>
         </span>`;
       }).join('') || '<span class="text-[11px] text-slate-400">활동단을 선택하세요 (선택)</span>';
+      if (typeof icUpdateAdvancedSummary === 'function') icUpdateAdvancedSummary();
     }
     window.icRemoveTeam = function (tid) { icTeamTags = icTeamTags.filter(x => x !== tid); icRenderTeamTags(); };
     function icUpdateMode() {
@@ -777,6 +824,21 @@
         staffDeptRow?.classList.add('hidden');
       }
     }
+    // 고급 옵션 요약 배지(권한/활동단/지정/개수가 기본과 다르면 표시)
+    function icUpdateAdvancedSummary() {
+      const el = document.getElementById('ic-advanced-summary');
+      if (!el) return;
+      const role = document.getElementById('ic-role')?.value || 'user';
+      const target = document.getElementById('ic-target-user')?.value.trim() || '';
+      const count = parseInt(document.getElementById('ic-count')?.value) || 1;
+      const parts = [];
+      if (role === 'admin') parts.push('관리자');
+      if (icTeamTags.length) parts.push(`활동단 ${icTeamTags.length}`);
+      if (target) parts.push('지정');
+      if (count > 1) parts.push(`${count}개`);
+      el.textContent = parts.length ? parts.join(' · ') : '기본값';
+      el.className = parts.length ? 'text-[10px] font-bold text-teal-600' : 'text-[10px] text-slate-400';
+    }
     window.openInviteCodeModal = function () {
       icTeamTags = [];
       const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
@@ -788,7 +850,27 @@
       if (sel) sel.innerHTML = '<option value="">+ 활동단 추가</option>' + TEAMS.map(t => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('');
       icRenderTeamTags();
       icUpdateMode();
+      icUpdateAdvancedSummary();
       showModal('invite-modal');
+      lucide.createIcons();
+    }
+
+    // 발급 결과 커스텀 팝업 표시
+    function showInviteResult(codes, meta, allowedTeams) {
+      window.__icLastCodes = codes;
+      const sub = document.getElementById('ic-result-sub');
+      const list = document.getElementById('ic-result-codes');
+      const teamNames = (allowedTeams || []).map(tid => { const t = getTeam(tid); return t ? t.name : tid; }).join(', ');
+      const who = [meta.name, meta.userType === 'staff' ? '직원' : '청소년', teamNames].filter(Boolean).join(' · ');
+      if (sub) sub.textContent = `${codes.length}개 발급됨${who ? ' — ' + who : ''}. 아래 코드를 대상자에게 전달하세요.`;
+      if (list) {
+        list.innerHTML = codes.map(c => `
+          <div class="flex items-center justify-between gap-2 px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl">
+            <span class="font-mono font-bold tracking-[0.2em] text-slate-800 text-base">${esc(c)}</span>
+            <button type="button" onclick="navigator.clipboard&&navigator.clipboard.writeText('${esc(c)}').then(()=>showToast('복사되었습니다.','success'))" class="text-slate-400 hover:text-teal-600 p-1.5 rounded-lg hover:bg-white transition-colors" title="복사"><i data-lucide="copy" class="w-4 h-4"></i></button>
+          </div>`).join('');
+      }
+      showModal('ic-result-modal');
       lucide.createIcons();
     }
 
@@ -946,6 +1028,9 @@
       <div class="flex gap-2 flex-wrap">
         <button onclick="bulkMigrateFirestore()" class="flex items-center gap-2 bg-slate-600 hover:bg-slate-700 text-white px-4 py-2 rounded-xl text-sm font-bold shadow-sm transition-all" title="Firebase Firestore의 기존 사용자를 Supabase로 일괄 이관">
           <i data-lucide="database" class="w-4 h-4"></i> Firestore 이관
+        </button>
+        <button onclick="cleanupOrphanAuth()" class="flex items-center gap-2 bg-rose-600 hover:bg-rose-700 text-white px-4 py-2 rounded-xl text-sm font-bold shadow-sm transition-all" title="Supabase에 없는데 Firebase 인증에만 남은 계정을 완전 삭제(아이디 재사용 가능)">
+          <i data-lucide="user-x" class="w-4 h-4"></i> 고아 계정 정리
         </button>
         <button onclick="openUserModal()" class="flex items-center gap-2 bg-teal-600 hover:bg-teal-700 text-white px-4 py-2 rounded-xl text-sm font-bold shadow-sm transition-all">
           <i data-lucide="user-plus" class="w-4 h-4"></i> 새 사용자 추가
@@ -1217,7 +1302,7 @@
         });
         XLSX.writeFile(wb, `유스나루_${weekId}.xlsx`);
         showToast('엑셀 다운로드 완료!', 'success');
-      } catch (e) { showToast('실패: ' + e.message, 'error'); }
+      } catch (e) { showToast('실패: ' + koErr(e), 'error'); }
     };
 
     // ========== GOOGLE SHEETS SETTINGS ==========
@@ -1358,7 +1443,7 @@
               throw new Error('가져온 탭 목록이 비어 있습니다.');
             }
           } catch(err) {
-            showToast('탭 목록 로드 실패: ' + err.message, 'error');
+            showToast('탭 목록 로드 실패: ' + koErr(err), 'error');
           } finally {
             btn.disabled = false; btn.textContent = '탭 목록 불러오기';
           }
@@ -1452,7 +1537,7 @@
             showToast('전체 동기화가 성공적으로 완료되었습니다!', 'success');
           } catch (err) {
             console.error('Sync Error:', err);
-            showToast('동기화 실패: ' + err.message, 'error');
+            showToast('동기화 실패: ' + koErr(err), 'error');
           } finally {
             btn.disabled = false;
             btn.innerHTML = origContent;
@@ -1482,7 +1567,7 @@
             showToast('구글 시트 연동 설정이 성공적으로 저장되었습니다.', 'success');
             await renderSheetsSettings();
           } catch(err) {
-            showToast('설정 저장 실패: ' + err.message, 'error');
+            showToast('설정 저장 실패: ' + koErr(err), 'error');
           } finally {
             btn.disabled = false; btn.innerHTML = `<i data-lucide="save" class="w-4 h-4"></i> 설정 저장`;
             lucide.createIcons();
@@ -1603,12 +1688,12 @@
     // 기본 삭제 = 비활성화(소프트삭제). 계정/데이터 보존, 재활성화 가능.
     window.confirmDeleteUser = async function (uid, username) {
       if (!await showConfirm(`사용자 [${username}]를 비활성화합니다.\n로그인이 차단되며, 언제든 재활성화할 수 있습니다.`, { title: '사용자 비활성화', okText: '비활성화', danger: true })) return;
-      deleteUser(uid, username).then(() => { showToast('사용자가 비활성화되었습니다.', 'success'); renderUsers(); }).catch(e => showToast(e.message, 'error'));
+      deleteUser(uid, username).then(() => { showToast('사용자가 비활성화되었습니다.', 'success'); renderUsers(); }).catch(e => showToast(koErr(e), 'error'));
     };
     window.handleReactivateUser = function (btn) {
       const uid = btn.getAttribute('data-uid');
       const username = btn.getAttribute('data-username');
-      reactivateUser(uid, username).then(() => { showToast('사용자가 재활성화되었습니다.', 'success'); renderUsers(); }).catch(e => showToast(e.message, 'error'));
+      reactivateUser(uid, username).then(() => { showToast('사용자가 재활성화되었습니다.', 'success'); renderUsers(); }).catch(e => showToast(koErr(e), 'error'));
     };
     // 완전삭제 = Firebase Auth 계정까지 제거(Edge Function). 같은 아이디로 새 가입 가능해짐.
     window.handleHardDeleteUser = function (btn) {
@@ -1618,7 +1703,7 @@
     };
     window.confirmHardDeleteUser = async function (uid, username) {
       if (!await showConfirm(`사용자 [${username}]를 완전 삭제합니다.\n\n• 로그인 계정과 모든 식별정보가 영구 삭제됩니다.\n• 복구할 수 없습니다.\n• 같은 아이디로 다시 가입할 수 있게 됩니다.\n\n(이 작업은 admin-auth Edge Function 배포가 필요합니다.)`, { title: '⚠ 완전 삭제', okText: '완전 삭제', danger: true })) return;
-      hardDeleteUser(uid, username).then(() => { showToast('사용자가 완전 삭제되었습니다.', 'success'); renderUsers(); }).catch(e => showToast(e.message, 'error'));
+      hardDeleteUser(uid, username).then(() => { showToast('사용자가 완전 삭제되었습니다.', 'success'); renderUsers(); }).catch(e => showToast(koErr(e), 'error'));
     };
 
     window.handleEditUser = function (btn) {
@@ -1709,7 +1794,7 @@
 
     window.confirmDeleteTeam = async function (tid, name) {
       if (!await showConfirm(`활동단 [${name}]를 삭제합니다.\n삭제 후 복구할 수 없습니다.`, { title: '활동단 삭제', okText: '삭제', danger: true })) return;
-      deleteTeam(tid, name).then(() => { showToast('활동단이 삭제되었습니다.', 'success'); renderTeams(); }).catch(e => showToast(e.message, 'error'));
+      deleteTeam(tid, name).then(() => { showToast('활동단이 삭제되었습니다.', 'success'); renderTeams(); }).catch(e => showToast(koErr(e), 'error'));
     };
 
     window.handleEditTeam = function (btn) {
@@ -1959,7 +2044,7 @@
             showToast('사용자가 추가되었습니다.', 'success');
           }
           hideModal('user-modal'); await renderUsers();
-        } catch (err) { showToast(err.message, 'error'); }
+        } catch (err) { showToast(koErr(err), 'error'); }
         finally { btn.disabled = false; btn.textContent = '저장'; }
       });
 
@@ -2048,7 +2133,7 @@
           if (isEdit) { const old = TEAMS.find(t => t.id === tid); await updateTeam(tid, data, old); showToast('활동단이 수정되었습니다.', 'success'); }
           else { await createTeam(data); showToast('활동단이 추가되었습니다.', 'success'); }
           hideModal('team-modal'); renderTeams();
-        } catch (err) { showToast(err.message, 'error'); }
+        } catch (err) { showToast(koErr(err), 'error'); }
         finally { btn.disabled = false; btn.textContent = '저장'; }
       });
 
@@ -2089,11 +2174,27 @@
             target_username: count === 1 ? targetUsername : null,
             used_by: null, meta,
           })));
-          showToast(count === 1 ? `초대코드 발급: ${codes[0]}` : `${count}개 초대코드 발급 완료`, 'success');
           hideModal('invite-modal');
+          showInviteResult(codes, meta, allowedTeams);
           await renderInviteCodes();
-        } catch (err) { showToast(err.message || '발급 실패', 'error'); }
+        } catch (err) { showToast(koErr(err), 'error'); }
         finally { btn.disabled = false; btn.textContent = '발급'; }
+      });
+
+      // 고급 옵션 창 열기/닫기/적용
+      document.getElementById('ic-advanced-btn')?.addEventListener('click', () => { showModal('ic-advanced-modal'); lucide.createIcons(); });
+      const closeAdvanced = () => { hideModal('ic-advanced-modal'); icUpdateAdvancedSummary(); };
+      document.getElementById('close-ic-advanced')?.addEventListener('click', closeAdvanced);
+      document.getElementById('ic-advanced-done')?.addEventListener('click', closeAdvanced);
+      document.getElementById('ic-target-user')?.addEventListener('input', icUpdateAdvancedSummary);
+      document.getElementById('ic-count')?.addEventListener('input', icUpdateAdvancedSummary);
+      document.getElementById('ic-role')?.addEventListener('change', icUpdateAdvancedSummary);
+
+      // 발급 결과 커스텀 팝업
+      document.getElementById('ic-result-close')?.addEventListener('click', () => hideModal('ic-result-modal'));
+      document.getElementById('ic-result-copy')?.addEventListener('click', () => {
+        const text = (window.__icLastCodes || []).join('\n');
+        navigator.clipboard?.writeText(text).then(() => showToast('복사되었습니다.', 'success')).catch(() => showToast('복사에 실패했습니다.', 'error'));
       });
       document.getElementById('close-contrib-modal')?.addEventListener('click', () => hideModal('contributor-modal'));
       document.getElementById('contributor-modal')?.addEventListener('click', e => { if (e.target === document.getElementById('contributor-modal')) hideModal('contributor-modal'); });
@@ -2134,7 +2235,7 @@
           }
           hideModal('contributor-modal');
           await renderContributors();
-        } catch(err) { showToast(err.message, 'error'); }
+        } catch(err) { showToast(koErr(err), 'error'); }
         finally { btn.disabled = false; btn.textContent = '저장'; }
       });
 
@@ -2600,41 +2701,57 @@
         <button id="close-invite-modal" class="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100"><i data-lucide="x" class="w-5 h-5"></i></button>
       </div>
       <form id="invite-form" class="p-5 flex flex-col gap-3">
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <label class="block text-xs font-semibold text-slate-600 mb-1.5">구분</label>
-            <select id="ic-usertype" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-teal-400">
-              <option value="youth">🧒 청소년</option>
-              <option value="staff">🧑‍🏫 직원/교사</option>
-            </select>
-          </div>
-          <div>
-            <label class="block text-xs font-semibold text-slate-600 mb-1.5">권한</label>
-            <select id="ic-role" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-teal-400">
-              <option value="user">일반 사용자</option>
-              <option value="admin">관리자</option>
-            </select>
-          </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1.5">구분</label>
+          <select id="ic-usertype" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-teal-400">
+            <option value="youth">🧒 청소년</option>
+            <option value="staff">🧑‍🏫 직원/교사</option>
+          </select>
         </div>
         <div>
           <label class="block text-xs font-semibold text-slate-600 mb-1.5">이름 <span class="text-slate-400 font-normal">(선택)</span></label>
           <input id="ic-name" type="text" placeholder="초대 대상 이름" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400 placeholder-slate-300">
-        </div>
-        <div id="ic-team-row">
-          <label class="block text-xs font-semibold text-slate-600 mb-1.5">활동단 <span class="text-slate-400 font-normal">(선택 · 복수 가능)</span></label>
-          <div id="ic-team-tags" class="flex flex-wrap gap-1.5 mb-2"></div>
-          <select id="ic-team-pick" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-teal-400"></select>
         </div>
         <div id="ic-dept-toggle-row" class="border border-slate-200 rounded-xl p-3 bg-slate-50/60">
           <label class="flex items-center justify-between cursor-pointer">
             <span class="text-xs font-semibold text-slate-700">부서 사용 <span class="text-slate-400 font-normal">(회원가입 시 부서 선택 활성화)</span></span>
             <input type="checkbox" id="ic-dept-enabled" class="accent-teal-600 w-4 h-4">
           </label>
-          <p class="text-[10px] text-slate-400 mt-1">활성화하면 가입자가 해당 활동단의 부서를 선택합니다(활동단 부서 설정 기준). 비활성화 시 부서 없이 가입.</p>
+          <p class="text-[10px] text-slate-400 mt-1">활성화하면 가입자가 선택한 활동단의 부서를 고릅니다. 비활성화 시 부서 없이 가입.</p>
         </div>
         <div id="ic-staff-dept-row" class="hidden">
           <label class="block text-xs font-semibold text-slate-600 mb-1.5">부서 <span class="text-slate-400 font-normal">(직원 · 선택)</span></label>
           <input id="ic-staff-dept" type="text" placeholder="예: 운영지원팀" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400 placeholder-slate-300">
+        </div>
+        <!-- 고급 옵션: 권한/활동단/지정사용자/개수는 별도 창에서 -->
+        <button type="button" id="ic-advanced-btn" class="flex items-center justify-between w-full px-3 py-2.5 text-sm border border-dashed border-slate-300 rounded-xl text-slate-600 hover:border-teal-400 hover:text-teal-600 hover:bg-teal-50/40 transition-all">
+          <span class="flex items-center gap-1.5"><i data-lucide="sliders-horizontal" class="w-4 h-4"></i> 고급 옵션</span>
+          <span id="ic-advanced-summary" class="text-[10px] text-slate-400">기본값</span>
+        </button>
+        <button type="submit" class="w-full bg-teal-600 hover:bg-teal-700 text-white font-bold py-2.5 rounded-xl transition-all text-sm shadow-sm mt-1">발급</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- 초대코드 고급 옵션 (별도 창) -->
+  <div id="ic-advanced-modal" class="hidden fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm border border-slate-200 overflow-hidden max-h-[90vh] overflow-y-auto">
+      <div class="flex items-center justify-between p-5 border-b border-slate-100">
+        <h2 class="font-bold text-slate-800 flex items-center gap-1.5"><i data-lucide="sliders-horizontal" class="w-4 h-4 text-teal-600"></i> 고급 옵션</h2>
+        <button id="close-ic-advanced" type="button" class="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100"><i data-lucide="x" class="w-5 h-5"></i></button>
+      </div>
+      <div class="p-5 flex flex-col gap-3">
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1.5">권한</label>
+          <select id="ic-role" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-teal-400">
+            <option value="user">일반 사용자</option>
+            <option value="admin">관리자</option>
+          </select>
+        </div>
+        <div id="ic-team-row">
+          <label class="block text-xs font-semibold text-slate-600 mb-1.5">활동단 <span class="text-slate-400 font-normal">(선택 · 복수 가능)</span></label>
+          <div id="ic-team-tags" class="flex flex-wrap gap-1.5 mb-2"></div>
+          <select id="ic-team-pick" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-teal-400"></select>
         </div>
         <div class="grid grid-cols-2 gap-3">
           <div>
@@ -2646,8 +2763,26 @@
             <input id="ic-count" type="number" min="1" max="50" value="1" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400">
           </div>
         </div>
-        <button type="submit" class="w-full bg-teal-600 hover:bg-teal-700 text-white font-bold py-2.5 rounded-xl transition-all text-sm shadow-sm mt-1">발급</button>
-      </form>
+        <button id="ic-advanced-done" type="button" class="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-2.5 rounded-xl transition-all text-sm shadow-sm mt-1">적용</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 초대코드 발급 결과 (커스텀 디자인 팝업) -->
+  <div id="ic-result-modal" class="hidden fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm border border-slate-200 overflow-hidden">
+      <div class="bg-gradient-to-br from-teal-500 to-teal-600 px-5 py-4 text-white flex items-center gap-2">
+        <i data-lucide="ticket-check" class="w-5 h-5"></i>
+        <h2 class="font-bold">초대코드 발급 완료</h2>
+      </div>
+      <div class="p-5">
+        <p id="ic-result-sub" class="text-xs text-slate-500 mb-3"></p>
+        <div id="ic-result-codes" class="flex flex-col gap-2 max-h-[50vh] overflow-y-auto"></div>
+        <div class="flex gap-2 mt-4">
+          <button id="ic-result-copy" type="button" class="flex-1 bg-teal-600 hover:bg-teal-700 text-white text-sm font-bold py-2.5 rounded-xl transition-all flex items-center justify-center gap-1.5"><i data-lucide="copy" class="w-4 h-4"></i> 전체 복사</button>
+          <button id="ic-result-close" type="button" class="px-5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold py-2.5 rounded-xl transition-all">닫기</button>
+        </div>
+      </div>
     </div>
   </div>
 

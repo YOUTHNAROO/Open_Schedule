@@ -132,6 +132,24 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ uid: luid }), { headers: { ...CORS, 'Content-Type': 'application/json' } });
     }
 
+    // ── 로그인 사용자(관리자 아님)도 가능: 푸시 발송 ───────────────────────
+    // OneSignal REST 키를 클라이언트에 노출하지 않기 위해 서버에서만 발송(보안).
+    if (action === 'sendPush') {
+      await verifyCaller(idToken); // 유효한 로그인 사용자만
+      const { externalUserIds, title, body: pushBody } = body;
+      const OS_APP = Deno.env.get('ONESIGNAL_APP_ID');
+      const OS_KEY = Deno.env.get('ONESIGNAL_REST_API_KEY');
+      if (!OS_APP || !OS_KEY || !Array.isArray(externalUserIds) || !externalUserIds.length) {
+        return new Response(JSON.stringify({ skipped: true }), { headers: { ...CORS, 'Content-Type': 'application/json' } });
+      }
+      const r = await fetch('https://onesignal.com/api/v1/notifications', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Key ${OS_KEY}` },
+        body: JSON.stringify({ app_id: OS_APP, include_aliases: { external_id: externalUserIds }, target_channel: 'push', headings: { ko: title, en: title }, contents: { ko: pushBody, en: pushBody } }),
+      });
+      return new Response(JSON.stringify({ sent: r.ok }), { headers: { ...CORS, 'Content-Type': 'application/json' } });
+    }
+
     // ── 이하 관리자 인증 필요 액션 ─────────────────────────────────────────
     if (!idToken) throw new Error('필수 파라미터 누락');
     const callerUid = await verifyCaller(idToken);
@@ -139,6 +157,47 @@ Deno.serve(async (req) => {
     if (role !== 'admin' && role !== 'superadmin') throw new Error('관리자 권한이 필요합니다.');
 
     const token = await getAccessToken();
+
+    // ── 고아 Firebase 인증계정 정리(최고관리자만) ──────────────────────────
+    // app_users에 없는데 Firebase Auth에만 남은 @youthnaroo.local 계정을 조회/삭제.
+    if (action === 'listOrphans' || action === 'purgeOrphans') {
+      if (role !== 'superadmin') throw new Error('고아 계정 정리는 최고관리자만 가능합니다.');
+      // 1) Supabase의 모든 사용자 id 수집
+      const uRes = await fetch(`${SB_URL}/rest/v1/app_users?select=id`, { headers: SB_HEADERS });
+      const known = new Set((await uRes.json()).map((r: { id: string }) => r.id));
+      // 2) Firebase Auth 전체 사용자 페이지네이션 조회
+      const orphans: { uid: string; email: string }[] = [];
+      let pageToken = '';
+      const nowMs = Date.now();
+      do {
+        const url = `https://identitytoolkit.googleapis.com/v1/projects/${PROJECT_ID}/accounts:batchGet?maxResults=1000${pageToken ? `&nextPageToken=${encodeURIComponent(pageToken)}` : ''}`;
+        const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+        const j = await r.json();
+        for (const u of (j.users || [])) {
+          const em = u.email || '';
+          if (!known.has(u.localId) && em.endsWith('@youthnaroo.local')) {
+            // 안전장치: 최근 1시간 내 생성 계정은 진행 중 가입일 수 있어 제외
+            const created = parseInt(u.createdAt || '0', 10);
+            if (!created || nowMs - created > 3600_000) orphans.push({ uid: u.localId, email: em });
+          }
+        }
+        pageToken = j.nextPageToken || '';
+      } while (pageToken);
+
+      if (action === 'listOrphans') {
+        return new Response(JSON.stringify({ orphans, count: orphans.length }), { headers: { ...CORS, 'Content-Type': 'application/json' } });
+      }
+      // purge
+      let deleted = 0;
+      for (const o of orphans) {
+        const dr = await fetch(`${base}:delete`, {
+          method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ localId: o.uid }),
+        });
+        if (dr.ok) deleted++;
+      }
+      return new Response(JSON.stringify({ deleted, total: orphans.length }), { headers: { ...CORS, 'Content-Type': 'application/json' } });
+    }
 
     if (action === 'deleteUser') {
       if (role !== 'superadmin') throw new Error('완전 삭제는 최고관리자만 가능합니다.');

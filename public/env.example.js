@@ -16,7 +16,7 @@ window.ENV = {
   SUPABASE_URL: "https://YOUR_PROJECT_ID.supabase.co",
   SUPABASE_ANON_KEY: "YOUR_SUPABASE_ANON_KEY",
 
-  // OneSignal (Dashboard > Keys & IDs)
+  // OneSignal — APP_ID만 클라이언트에 둔다. REST 키는 서버 시크릿으로:
+  //   supabase secrets set ONESIGNAL_REST_API_KEY=... ONESIGNAL_APP_ID=...
   ONESIGNAL_APP_ID: "YOUR_ONESIGNAL_APP_ID",
-  ONESIGNAL_REST_API_KEY: "YOUR_ONESIGNAL_REST_API_KEY",
 };

@@ -1,7 +1,7 @@
 import { supabase, dbInsert, dbUpsert, dbUpdate, dbDelete, dbGet, dbGetMany } from './supabase.js';
 import S from './state.js';
 import { HOURS, ALL_ROOMS } from './constants.js';
-import { esc, getTeam, isAdmin } from './utils.js';
+import { esc, getTeam, isAdmin, koErr } from './utils.js';
 import { showToast, showModal, hideModal, showConfirm, expandHourRange, setupPersonTagInput, setupTagInput } from './ui.js';
 import { addActivityLog } from './logging.js';
 import { syncGoogleSheets } from './sheets.js';
@@ -153,7 +153,7 @@ async function makeReservation(hour, room) {
             showToast(`${team.name} 예약 완료!`, 'success');
             syncGoogleSheets('reserve', S.activeDay, hour, room, team.name, S.currentUser.displayName, resData.note);
         }
-    } catch (e) { showToast(e.message || '예약 실패', 'error'); }
+    } catch (e) { showToast(koErr(e), 'error'); }
 }
 
 function openCancelReservationModal(hour, room, existing, action) {
@@ -234,7 +234,7 @@ async function cancelReservation(hour, room) {
         syncGoogleSheets('cancel', S.activeDay, hour, room, existing.teamName, existing.userName, '');
         window.closeReservationDetails && window.closeReservationDetails();
     } catch (e) {
-        showToast('취소 실패: ' + e.message, 'error');
+        showToast('취소 실패: ' + koErr(e), 'error');
     } finally {
         window.isCancellingLocal = false;
     }
@@ -288,7 +288,7 @@ async function updateReservationDetails() {
         showToast('세부 설정이 저장되었습니다.', 'success');
         S.selectedReservationContext = { hour, room, key };
         window.renderReservationDetails && window.renderReservationDetails();
-    } catch (e) { showToast('저장 실패: ' + e.message, 'error'); }
+    } catch (e) { showToast('저장 실패: ' + koErr(e), 'error'); }
 }
 
 async function addComment(key, text, { isLog = false } = {}) {
