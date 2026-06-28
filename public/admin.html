@@ -529,62 +529,8 @@
       } catch (e) { showToast(koErr(e), 'error'); }
     };
 
-    window.bulkMigrateFirestore = async function () {
-      const ok = await showConfirm(
-        'Firestore의 users 컬렉션을 Supabase app_users로 일괄 이관합니다.\n이미 이관된 사용자는 건너뜁니다.\n진행할까요?',
-        { title: 'Firestore 사용자 전체 이관', okText: '이관 시작' }
-      );
-      if (!ok) return;
-
-      let migrated = 0, skipped = 0, failed = 0;
-      try {
-        const snap = await getDocs(collection(db, 'users'));
-        const total = snap.docs.length;
-        if (total === 0) { showToast('Firestore에 이관할 사용자가 없습니다.', 'info'); return; }
-        showToast(`${total}명 처리 중...`, 'info');
-
-        for (const docSnap of snap.docs) {
-          const uid = docSnap.id;
-          const legacy = docSnap.data();
-          try {
-            const already = await dbGet('app_users', { id: uid });
-            if (already) { skipped++; continue; }
-
-            const uname = legacy.username || uid.slice(0, 8);
-            let rec = {};
-            try { rec = (await getDoc(doc(db, 'user_recovery', uname))).data() || {}; } catch {}
-
-            await dbInsert('app_users', {
-              id: uid,
-              email: `${uname}@youthnaroo.local`,
-              username: uname,
-              display_name: legacy.displayName || uname,
-              name: legacy.displayName || uname,
-              role: legacy.role || 'user',
-              allowed_teams: legacy.allowedTeams || [],
-              is_active: legacy.isActive !== false,
-              phone: legacy.phone || null,
-              created_by: 'bulk-migration',
-              data: {
-                ...(legacy.photoUrl ? { photoUrl: legacy.photoUrl } : {}),
-                ...(rec.securityQuestion ? { securityQuestion: rec.securityQuestion } : {}),
-                ...(rec.securityAnswerHash ? { securityAnswerHash: rec.securityAnswerHash } : {}),
-                ...(rec.encryptedPassword ? { encryptedPassword: rec.encryptedPassword } : {}),
-                migratedFromFirestore: true,
-              },
-            });
-            migrated++;
-          } catch (e) {
-            console.warn('[bulk-migrate] 실패:', uid, e?.message);
-            failed++;
-          }
-        }
-        showToast(`이관 완료: 신규 ${migrated}명 | 이미 존재 ${skipped}명 | 실패 ${failed}명`, 'success');
-        if (migrated > 0) renderUsers();
-      } catch (e) {
-        showToast('이관 실패: ' + koErr(e), 'error');
-      }
-    };
+    // (Firestore 일괄 이관 버튼/함수는 이관 완료 후 제거됨. 모든 신규 사용자 데이터는 Supabase에 기록되며,
+    //  혹시 남은 레거시 계정이 있어도 로그인 시 auth.js의 migrateLegacyUserToSupabase가 자동 이관함.)
 
     // 완전삭제 = Edge Function으로 Firebase Auth 계정까지 제거 후 app_users 행 삭제.
     // 이후 같은 아이디로 완전히 새 가입 가능(버그 1 해결).
@@ -1026,9 +972,6 @@
         <p class="text-xs text-slate-400 mt-0.5">전체 ${users.length}명</p>
       </div>
       <div class="flex gap-2 flex-wrap">
-        <button onclick="bulkMigrateFirestore()" class="flex items-center gap-2 bg-slate-600 hover:bg-slate-700 text-white px-4 py-2 rounded-xl text-sm font-bold shadow-sm transition-all" title="Firebase Firestore의 기존 사용자를 Supabase로 일괄 이관">
-          <i data-lucide="database" class="w-4 h-4"></i> Firestore 이관
-        </button>
         <button onclick="cleanupOrphanAuth()" class="flex items-center gap-2 bg-rose-600 hover:bg-rose-700 text-white px-4 py-2 rounded-xl text-sm font-bold shadow-sm transition-all" title="Supabase에 없는데 Firebase 인증에만 남은 계정을 완전 삭제(아이디 재사용 가능)">
           <i data-lucide="user-x" class="w-4 h-4"></i> 고아 계정 정리
         </button>
