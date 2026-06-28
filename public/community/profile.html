@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>프로필 · 유스나루</title>
+<link rel="stylesheet" href="assets/everytime.css?v=9" />
+<script src="../env.js"></script>
+<style>
+  .prof-top{background:var(--surface);padding:22px 18px 18px;border-bottom:1px solid var(--border)}
+  .prof-id{display:flex;align-items:center;gap:14px}
+  .prof-av{width:60px;height:60px;border-radius:20px;background:linear-gradient(135deg,#6366f1,#8b5cf6);display:grid;place-items:center;color:#fff;font-size:24px;font-weight:800;flex:0 0 auto}
+  .prof-name{min-width:0}
+  .prof-name b{font-size:19px;font-weight:800;letter-spacing:-.02em;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .prof-name .h{font-size:12.5px;color:var(--muted);margin-top:3px;display:flex;align-items:center;gap:5px}
+  .prof-name .h svg{width:13px;height:13px;flex:0 0 auto}
+  .edit-btn{margin-left:auto;border:1.5px solid var(--border);background:var(--surface);color:var(--muted);font-size:12.5px;font-weight:700;padding:8px 13px;border-radius:10px;cursor:pointer;align-self:flex-start;display:flex;align-items:center;gap:5px;white-space:nowrap}
+  .edit-btn svg{width:13px;height:13px}
+  .edit-btn:active{background:var(--secondary)}
+  .nick-note{font-size:11px;color:var(--faint);margin-top:11px;line-height:1.5;display:flex;align-items:center;gap:5px}
+  .nick-note svg{width:12px;height:12px;flex:0 0 auto}
+  .stats{display:flex;margin-top:16px;background:var(--secondary);border-radius:14px;overflow:hidden}
+  .stat{flex:1;padding:13px 0;text-align:center}
+  .stat + .stat{border-left:1px solid var(--border)}
+  .stat b{font-size:18px;font-weight:800;display:block;font-variant-numeric:tabular-nums}
+  .stat span{font-size:11.5px;color:var(--muted);font-weight:600}
+  /* 탭 */
+  .ptabs{display:flex;background:var(--surface);border-bottom:1px solid var(--border);position:sticky;top:52px;z-index:20;margin-top:12px}
+  .ptab{flex:1;border:0;background:transparent;padding:13px 0;font-size:13.5px;font-weight:700;color:var(--faint);cursor:pointer;position:relative}
+  .ptab.active{color:var(--fg)}
+  .ptab.active::after{content:"";position:absolute;left:25%;right:25%;bottom:0;height:2.5px;border-radius:2px;background:var(--primary)}
+  .pane{display:none}
+  .pane.show{display:block}
+  .mini-post{display:block;background:var(--surface);padding:14px 16px;border-bottom:1px solid var(--border);cursor:pointer}
+  .mini-post .mh{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--faint);font-weight:600;margin-bottom:5px}
+  .mini-post .mh .tag{color:var(--primary);font-weight:700}
+  .mini-post .mt{font-size:15px;font-weight:700;letter-spacing:-.01em;line-height:1.4}
+  .mini-post .mb{font-size:13px;color:var(--muted);margin-top:3px;line-height:1.5;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
+  .mini-post .mstat{display:flex;gap:14px;margin-top:8px;font-size:11.5px;color:var(--faint);font-weight:600}
+  .mini-post .mstat span{display:flex;align-items:center;gap:4px}
+  .mini-post .mstat svg{width:13px;height:13px}
+  .settings-row{display:flex;align-items:center;gap:12px;background:var(--surface);padding:15px 16px;border-bottom:1px solid var(--border);cursor:pointer;width:100%;border:0;border-bottom:1px solid var(--border);text-align:left;text-decoration:none}
+  .settings-row svg{width:20px;height:20px;color:var(--muted);flex:0 0 auto}
+  .settings-row b{font-size:14.5px;font-weight:600;flex:1;color:var(--fg)}
+  .settings-row .chev{color:var(--faint);display:flex}
+</style>
+</head>
+<body>
+<div class="app" data-od-id="profile">
+  <header class="pagehead">
+    <a class="back-btn" href="home.html" aria-label="뒤로"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg></a>
+    <span class="title">프로필</span>
+    <span class="spacer"></span>
+  </header>
+
+  <main class="scrollbody" style="padding-bottom:84px">
+    <section class="prof-top">
+      <div class="prof-id">
+        <span class="prof-av" id="profAv">·</span>
+        <div class="prof-name">
+          <b id="profName">불러오는 중…</b>
+          <div class="real" id="profReal" style="display:none"></div>
+          <span class="grade-badge" id="profGrade" style="display:none"></span>
+        </div>
+        <button class="edit-btn" id="editBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>편집</button>
+      </div>
+      <div class="nick-note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>커뮤니티 별명은 시간표 이름과 별개예요. 비워서 저장하면 시간표 이름으로 표시돼요.</div>
+      <div class="stats">
+        <div class="stat"><b id="statPosts">–</b><span>작성 글</span></div>
+        <div class="stat"><b id="statLikes">–</b><span>받은 공감</span></div>
+        <div class="stat"><b id="statComments">–</b><span>댓글</span></div>
+      </div>
+    </section>
+
+    <nav class="ptabs">
+      <button class="ptab active" data-pane="0">내가 쓴 글</button>
+      <button class="ptab" data-pane="1">댓글 단 글</button>
+      <button class="ptab" data-pane="2">스크랩</button>
+    </nav>
+
+    <div class="pane show" id="pane0"></div>
+    <div class="pane" id="pane1"></div>
+    <div class="pane" id="pane2"></div>
+
+    <div id="adminSection" style="display:none">
+      <div class="sec-label">관리</div>
+      <a class="settings-row" href="admin.html">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/></svg>
+        <b>커뮤니티 관리</b>
+        <span class="chev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 6 6 6-6 6"/></svg></span>
+      </a>
+    </div>
+
+    <div class="sec-label">계정</div>
+    <button class="settings-row" id="logoutBtn" style="width:100%;border:0;background:var(--surface);text-align:left;cursor:pointer;color:var(--danger);font-family:inherit">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+      <b>로그아웃</b>
+      <span class="chev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 6 6 6-6 6"/></svg></span>
+    </button>
+  </main>
+
+  <nav class="botnav">
+    <a class="nav-item" href="home.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 10 9-7 9 7"/><path d="M5 9v11h14V9"/></svg>홈</a>
+    <a class="nav-item" href="board.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h6"/></svg>게시판</a>
+    <a class="nav-item nav-write" href="write.html"><span class="fab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 5v14M5 12h14"/></svg></span></a>
+    <a class="nav-item" href="notifications.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>알림</a>
+    <a class="nav-item active" href="profile.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>프로필</a>
+  </nav>
+</div>
+
+<!-- 프로필 편집 모달(사진 + 별명) -->
+<div class="modal-wrap" id="editModal">
+  <div class="modal-bg" id="editBg"></div>
+  <div class="modal" style="text-align:left">
+    <h4 style="text-align:center">프로필 편집</h4>
+    <div class="pe-photo">
+      <div class="pv" id="pePreview">·</div>
+      <div class="pbtns">
+        <button class="pbtn" id="pePick" type="button">사진 변경</button>
+        <button class="pbtn" id="peRemove" type="button">사진 제거</button>
+      </div>
+      <input type="file" id="peFile" accept="image/*" style="display:none" />
+    </div>
+    <div class="field-label">커뮤니티 별명</div>
+    <input class="m-input" id="peNick" type="text" maxlength="20" placeholder="비우면 시간표 이름으로 표시돼요" />
+    <p style="font-size:11.5px;color:var(--faint);line-height:1.5;margin-top:8px">커뮤니티 별명은 시간표 이름과 별개예요. 비워서 저장하면 시간표 이름으로 표시돼요.</p>
+    <div class="modal-actions">
+      <button class="btn ghost block" id="peCancel" type="button">취소</button>
+      <button class="btn primary block" id="peSave" type="button">저장</button>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+  import { requireLoginOrRedirect, getCurrentUser, getProfileStats, getMyPosts, getMyComments, getMyScraps, updateMyProfile, compressToDataUrl, logout, boardName } from './community-data.js?v=9';
+  import { esc, timeAgo, toast, emptyHTML } from './community-ui.js?v=9';
+
+  const me = await requireLoginOrRedirect();
+
+  const HEART = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>';
+  const CHAT  = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.5 8.5 0 0 1-12.3 7.6L3 21l1.9-5.7A8.5 8.5 0 1 1 21 11.5Z"/></svg>';
+
+  // role → 등급 텍스트/스타일
+  function gradeOf(u) {
+    if (u?.role === 'superadmin') return { text: '최고관리자', cls: 'super' };
+    if (u?.role === 'admin') return { text: '관리자', cls: 'admin' };
+    return { text: '일반회원', cls: '' };
+  }
+
+  /* ── 미니 포스트 행 ── */
+  function miniPostHTML(p) {
+    const badge = p.isAnonymous
+      ? `<span class="badge-anon">익명</span> <span class="tag">${esc(boardName(p.board))}</span>`
+      : `<span class="tag">${esc(boardName(p.board))}</span>`;
+    const excerpt = (p.content || '').replace(/\n/g, ' ').trim();
+    return `
+    <a class="mini-post" href="post-detail.html?id=${esc(p.id)}">
+      <div class="mh">${badge} · ${esc(timeAgo(p.createdAt))}</div>
+      <div class="mt">${esc(p.title || '(제목 없음)')}</div>
+      ${excerpt ? `<div class="mb">${esc(excerpt)}</div>` : ''}
+      <div class="mstat">
+        <span>${HEART}${p.likeCount || 0}</span>
+        <span>${CHAT}${p.commentCount || 0}</span>
+      </div>
+    </a>`;
+  }
+  function renderList(el, posts, emptyMsg) {
+    el.innerHTML = posts.length ? posts.map(miniPostHTML).join('') : emptyHTML(emptyMsg);
+  }
+
+  /* ── 탭 전환 + 지연 로드 ── */
+  const tabs = [...document.querySelectorAll('.ptab')];
+  const panes = [...document.querySelectorAll('.pane')];
+  const loaders = [loadMyPosts, loadMyComments, loadMyScraps];
+  const loaded = [false, false, false];
+
+  function showPane(i) {
+    tabs.forEach((x, idx) => x.classList.toggle('active', idx === i));
+    panes.forEach((p, idx) => p.classList.toggle('show', idx === i));
+    if (!loaded[i]) { loaded[i] = true; loaders[i](); }
+  }
+  tabs.forEach(t => t.addEventListener('click', () => showPane(Number(t.dataset.pane))));
+
+  const pane0 = document.getElementById('pane0');
+  const pane1 = document.getElementById('pane1');
+  const pane2 = document.getElementById('pane2');
+
+  async function loadMyPosts() {
+    pane0.innerHTML = emptyHTML('불러오는 중…');
+    try { renderList(pane0, await getMyPosts({ max: 50 }), '아직 작성한 글이 없어요'); }
+    catch { pane0.innerHTML = emptyHTML('글을 불러오지 못했어요'); toast('내 글을 불러오지 못했어요'); }
+  }
+  async function loadMyComments() {
+    pane1.innerHTML = emptyHTML('불러오는 중…');
+    try { renderList(pane1, await getMyComments({ max: 50 }), '댓글을 단 글이 없어요'); }
+    catch { pane1.innerHTML = emptyHTML('댓글 단 글을 불러오지 못했어요'); }
+  }
+  async function loadMyScraps() {
+    pane2.innerHTML = emptyHTML('불러오는 중…');
+    try { renderList(pane2, await getMyScraps({ max: 50 }), '스크랩한 글이 없어요'); }
+    catch { pane2.innerHTML = emptyHTML('스크랩을 불러오지 못했어요'); }
+  }
+
+  /* ── 헤더(별명/실명/등급/아바타) ── */
+  const nameEl = document.getElementById('profName');
+  const realEl = document.getElementById('profReal');
+  const gradeEl = document.getElementById('profGrade');
+  const avEl = document.getElementById('profAv');
+  function setHeader(u) {
+    const nick = (u && u.nickname) || '익명';
+    nameEl.textContent = nick;
+    // 아바타: 사진 있으면 사진, 없으면 별명 첫 글자
+    if (u && u.photoUrl) {
+      avEl.innerHTML = `<img src="${esc(u.photoUrl)}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:inherit">`;
+    } else {
+      avEl.textContent = (nick.slice(0, 1) || '·').toUpperCase();
+    }
+    // 별명을 따로 설정했고 실명과 다르면 실명을 보조로 노출(본인 프로필이므로 익명성 무관)
+    if (u && u.hasCustomNick && u.realName && u.realName !== nick) {
+      realEl.textContent = u.realName; realEl.style.display = '';
+    } else { realEl.style.display = 'none'; }
+    const g = gradeOf(u);
+    gradeEl.textContent = g.text;
+    gradeEl.className = 'grade-badge' + (g.cls ? ' ' + g.cls : '');
+    gradeEl.style.display = '';
+  }
+  setHeader(me);
+  if (me?.isAdmin) document.getElementById('adminSection').style.display = '';
+
+  /* ── 프로필 편집(사진 + 별명) 모달 ── */
+  let pendingPhoto; // undefined=변경없음, ''=제거, dataURL=새 사진
+  const editModal = document.getElementById('editModal');
+  const pePreview = document.getElementById('pePreview');
+  const peNick = document.getElementById('peNick');
+  const peFile = document.getElementById('peFile');
+
+  function renderPhotoPreview() {
+    const cur = pendingPhoto !== undefined ? pendingPhoto : (me.photoUrl || '');
+    if (cur) pePreview.innerHTML = `<img src="${esc(cur)}" alt="">`;
+    else pePreview.textContent = ((peNick.value.trim() || me.nickname || '·').slice(0, 1)).toUpperCase();
+  }
+
+  document.getElementById('editBtn').addEventListener('click', () => {
+    pendingPhoto = undefined;
+    peNick.value = me.hasCustomNick ? (me.nickname || '') : '';
+    renderPhotoPreview();
+    editModal.classList.add('open');
+  });
+  document.getElementById('peCancel').onclick = document.getElementById('editBg').onclick = () => editModal.classList.remove('open');
+  peNick.addEventListener('input', () => { if (pendingPhoto === undefined ? !me.photoUrl : !pendingPhoto) renderPhotoPreview(); });
+
+  document.getElementById('pePick').onclick = () => peFile.click();
+  peFile.addEventListener('change', async () => {
+    const f = peFile.files && peFile.files[0]; if (!f) return;
+    toast('사진을 처리 중…');
+    const url = await compressToDataUrl(f, { maxDim: 512 });
+    if (!url) { toast('사진이 너무 커요. 다른 사진을 골라주세요'); return; }
+    pendingPhoto = url; renderPhotoPreview();
+    peFile.value = '';
+  });
+  document.getElementById('peRemove').onclick = () => { pendingPhoto = ''; renderPhotoPreview(); };
+
+  document.getElementById('peSave').onclick = async () => {
+    const next = peNick.value.trim();
+    const args = { nickname: next };
+    if (pendingPhoto !== undefined) args.photoDataUrl = pendingPhoto;
+    document.getElementById('peSave').disabled = true;
+    try {
+      const r = await updateMyProfile(args);
+      me.nickname = r.nickname; me.hasCustomNick = r.hasCustomNick; me.photoUrl = r.photoUrl;
+      setHeader(me);
+      editModal.classList.remove('open');
+      toast('프로필을 저장했어요');
+    } catch (e) { toast(e?.message || '저장에 실패했어요'); }
+    finally { document.getElementById('peSave').disabled = false; }
+  };
+
+  /* ── 통계 ── */
+  try {
+    const stats = await getProfileStats();
+    document.getElementById('statPosts').textContent = (stats.postCount || 0).toLocaleString();
+    document.getElementById('statLikes').textContent = (stats.likeCount || 0).toLocaleString();
+    document.getElementById('statComments').textContent = (stats.commentCount || 0).toLocaleString();
+  } catch {
+    document.getElementById('statPosts').textContent = '0';
+    document.getElementById('statLikes').textContent = '0';
+    document.getElementById('statComments').textContent = '0';
+  }
+
+  /* ── 로그아웃(본체 시간표도 함께 로그아웃) ── */
+  document.getElementById('logoutBtn').addEventListener('click', async () => {
+    if (!confirm('로그아웃할까요?\n시간표 예약 플랫폼에서도 함께 로그아웃됩니다.')) return;
+    await logout();
+    location.replace('/'); // 본체로 이동 → 로그인 화면 표시
+  });
+
+  /* ── 첫 탭 로드 ── */
+  showPane(0);
+</script>
+</body>
+</html>

@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>1:1 익명채팅 · 유스나루</title>
+<link rel="stylesheet" href="assets/everytime.css?v=9" />
+<script src="../env.js"></script>
+<style>
+  .chat-body{flex:1;overflow-y:auto;padding:14px 14px 84px;background:var(--secondary);display:flex;flex-direction:column;gap:8px}
+  .center{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;text-align:center;color:var(--muted);padding:40px 24px}
+  .center .ico{width:64px;height:64px;border-radius:20px;background:var(--anon-bg);color:var(--anon);display:grid;place-items:center}
+  .center .ico svg{width:32px;height:32px}
+  .spinner{width:30px;height:30px;border:3px solid var(--anon-bg);border-top-color:var(--anon);border-radius:50%;animation:spin 1s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .center b{font-size:16px;color:var(--fg)}
+  .center span{font-size:13px;line-height:1.6}
+  .msg{max-width:74%;padding:9px 13px;border-radius:15px;font-size:14px;line-height:1.5;word-break:break-word}
+  .msg.them{align-self:flex-start;background:#fff;border:1px solid var(--border);border-bottom-left-radius:5px}
+  .msg.me{align-self:flex-end;background:var(--primary);color:#fff;border-bottom-right-radius:5px}
+  .sys{align-self:center;font-size:11.5px;color:var(--faint);background:rgba(15,23,42,.05);padding:5px 11px;border-radius:999px;margin:4px 0}
+  .chat-bar{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:var(--maxw);background:rgba(255,255,255,.97);backdrop-filter:blur(14px);border-top:1px solid var(--border);padding:9px 12px max(9px,env(safe-area-inset-bottom));z-index:40;display:flex;align-items:center;gap:9px}
+  .chat-input{flex:1;border:1.5px solid var(--border);border-radius:999px;background:var(--secondary);padding:10px 14px;font-size:14px;font-family:inherit;outline:none}
+  .chat-input:focus{border-color:var(--anon);background:#fff}
+  .csend{width:40px;height:40px;flex:0 0 auto;border:0;border-radius:50%;background:var(--primary);color:#fff;display:grid;place-items:center;cursor:pointer}
+  .csend:disabled{background:#cbd5e1}
+  .csend svg{width:19px;height:19px}
+  .btn-wide{border:0;border-radius:13px;padding:13px 22px;font-size:15px;font-weight:800;cursor:pointer}
+</style>
+</head>
+<body>
+<div class="app" data-od-id="chat">
+  <header class="pagehead">
+    <a class="back-btn" href="meetup.html" id="backBtn" aria-label="뒤로"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg></a>
+    <span class="title">1:1 익명채팅</span>
+    <span class="spacer"></span>
+    <button class="text-btn" id="leaveBtn" style="display:none;color:var(--danger)">나가기</button>
+  </header>
+
+  <main class="chat-body" id="chatBody">
+    <!-- 상태별 화면 -->
+  </main>
+
+  <div class="chat-bar" id="chatBar" style="display:none">
+    <input class="chat-input" id="msgInput" type="text" placeholder="메시지를 입력하세요 (익명)" maxlength="500" />
+    <button class="csend" id="sendBtn" disabled aria-label="전송"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7Z"/></svg></button>
+  </div>
+</div>
+
+<script type="module">
+  import { requireLoginOrRedirect, startMatch, waitForMatch, cancelMatch, subscribeChat, subscribeChatRoom, sendChatMessage, leaveChat } from './community-data.js?v=9';
+  import { esc, toast } from './community-ui.js?v=9';
+
+  const me = await requireLoginOrRedirect();
+  const $ = id => document.getElementById(id);
+  const body = $('chatBody');
+  let roomId = null, unsubMsg = null, unsubRoom = null, unsubWait = null, ended = false;
+
+  function cleanup() { if (unsubMsg) unsubMsg(); if (unsubRoom) unsubRoom(); if (unsubWait) unsubWait(); unsubMsg = unsubRoom = unsubWait = null; }
+
+  function showSearching() {
+    $('chatBar').style.display = 'none'; $('leaveBtn').style.display = 'none';
+    body.innerHTML = `<div class="center">
+      <div class="spinner"></div>
+      <b>상대를 찾는 중…</b>
+      <span>지금 함께 채팅할 익명 상대를 찾고 있어요.<br>잠시만 기다려 주세요.</span>
+      <button class="btn-wide" id="cancelBtn" style="background:var(--secondary);color:var(--muted)">매칭 취소</button>
+    </div>`;
+    $('cancelBtn').onclick = async () => { await cancelMatch(); location.href = 'meetup.html'; };
+  }
+
+  function showChat() {
+    $('chatBar').style.display = 'flex'; $('leaveBtn').style.display = '';
+    body.innerHTML = '<div class="sys">상대와 연결됐어요. 서로를 존중하는 대화를 해주세요 🙂</div>';
+  }
+
+  function renderMessages(msgs) {
+    const sys = body.querySelector('.sys');
+    const head = sys ? sys.outerHTML : '<div class="sys">상대와 연결됐어요. 서로를 존중하는 대화를 해주세요 🙂</div>';
+    body.innerHTML = head + msgs.map(m =>
+      `<div class="msg ${m.senderUid === me.uid ? 'me' : 'them'}">${esc(m.text)}</div>`).join('');
+    body.scrollTop = body.scrollHeight;
+  }
+
+  function onEnded(msg) {
+    if (ended) return; ended = true;
+    cleanup();
+    $('chatBar').style.display = 'none'; $('leaveBtn').style.display = 'none';
+    body.insertAdjacentHTML('beforeend', `<div class="sys">${esc(msg || '대화가 종료되었어요.')}</div>`);
+    const c = document.createElement('div'); c.className = 'center'; c.style.paddingTop = '20px';
+    c.innerHTML = `<button class="btn-wide" id="againBtn" style="background:var(--primary);color:#fff">새로운 상대와 채팅</button>
+      <button class="btn-wide" id="toMeetup" style="background:var(--secondary);color:var(--muted)">번개로 돌아가기</button>`;
+    body.appendChild(c); body.scrollTop = body.scrollHeight;
+    $('againBtn').onclick = () => { ended = false; roomId = null; begin(); };
+    $('toMeetup').onclick = () => location.href = 'meetup.html';
+  }
+
+  function openRoom(id) {
+    if (roomId) return; roomId = id; ended = false;
+    if (unsubWait) { unsubWait(); unsubWait = null; }
+    showChat();
+    unsubMsg = subscribeChat(id, renderMessages);
+    unsubRoom = subscribeChatRoom(id, room => { if (room && room.status === 'ended') onEnded('상대가 대화를 종료했어요.'); });
+  }
+
+  async function begin() {
+    showSearching();
+    try {
+      const r = await startMatch();
+      if (r.roomId) openRoom(r.roomId);
+      else unsubWait = await waitForMatch(id => openRoom(id));
+    } catch (e) { toast(e.message || '매칭에 실패했어요'); setTimeout(() => location.href = 'meetup.html', 1200); }
+  }
+
+  // 입력/전송
+  $('msgInput').oninput = () => { $('sendBtn').disabled = $('msgInput').value.trim().length === 0; };
+  async function send() {
+    const t = $('msgInput').value.trim(); if (!t || !roomId) return;
+    $('msgInput').value = ''; $('sendBtn').disabled = true;
+    try { await sendChatMessage(roomId, t); } catch (e) { toast('전송 실패'); }
+  }
+  $('sendBtn').onclick = send;
+  // 한글 IME 조합 중 Enter는 무시 — 조합 중 전송하면 마지막 글자가 한 번 더 입력되는 버그 방지.
+  let _composing = false;
+  $('msgInput').addEventListener('compositionstart', () => { _composing = true; });
+  $('msgInput').addEventListener('compositionend', () => { _composing = false; });
+  $('msgInput').addEventListener('keydown', e => {
+    // e.isComposing / e.keyCode===229 도 조합 중을 의미(브라우저별 보강).
+    if (e.key === 'Enter' && !e.shiftKey && !_composing && !e.isComposing && e.keyCode !== 229) {
+      e.preventDefault();
+      send();
+    }
+  });
+
+  // 나가기
+  $('leaveBtn').onclick = async () => {
+    if (!confirm('대화를 종료할까요?')) return;
+    if (roomId) await leaveChat(roomId);
+    onEnded('대화를 종료했어요.');
+  };
+  $('backBtn').onclick = async (e) => { if (roomId && !ended) { await leaveChat(roomId); } else { await cancelMatch(); } };
+  window.addEventListener('beforeunload', () => { if (!roomId) cancelMatch(); else if (!ended) leaveChat(roomId); });
+
+  begin();
+</script>
+</body>
+</html>

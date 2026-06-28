@@ -17,7 +17,9 @@ function promptPushPermission() {
     }
     window.OneSignalDeferred = window.OneSignalDeferred || [];
     window.OneSignalDeferred.push(async function(OneSignal) {
-        try { await OneSignal.Slidedown.promptPush(); } catch {}
+        // OneSignal 브랜드 슬라이드다운 대신 브라우저 네이티브 권한창을 직접 호출 —
+        // 피싱 느낌 없이 OS 표준 다이얼로그만 노출된다.
+        try { await OneSignal.Notifications.requestPermission(); } catch {}
     });
 }
 window.promptPushPermission = promptPushPermission;

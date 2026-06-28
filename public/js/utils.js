@@ -67,4 +67,31 @@ function getWeeksInMonth(year, month) {
     return weeks;
 }
 
-export { getWeekId, getTeam, isAdmin, esc, isValidHexColor, normalizeColor, getTextColorForBg, getWeekDateRange, getWeeksInMonth };
+// ISO weekId(예: "2026-W26") → "6월 2주차" 형식(해당 주가 속한 달의 N번째 주).
+// 기준일은 ISO 주의 목요일(그 주가 속한 달/연도를 결정).
+function formatWeekLabel(weekId) {
+    if (!weekId || !weekId.includes('-W')) return weekId || '';
+    try {
+        const { start } = getWeekDateRange(weekId);
+        const thu = new Date(start);
+        thu.setDate(start.getDate() + 3); // 월요일+3 = 목요일
+        const weekOfMonth = Math.ceil(thu.getDate() / 7);
+        return `${thu.getMonth() + 1}월 ${weekOfMonth}주차`;
+    } catch { return weekId; }
+}
+
+// 휴대폰 번호 자동 하이픈: 숫자만 추출 후 010-0000-0000 형식으로 변환.
+// 010(11자리) / 01x(10자리) / 02·지역번호 등도 합리적으로 처리. 형식 불명확하면 원본 반환.
+function formatPhone(raw) {
+    const d = String(raw || '').replace(/[^0-9]/g, '');
+    if (!d) return '';
+    if (d.startsWith('02')) { // 서울 지역번호
+        if (d.length === 9)  return `${d.slice(0,2)}-${d.slice(2,5)}-${d.slice(5)}`;
+        if (d.length === 10) return `${d.slice(0,2)}-${d.slice(2,6)}-${d.slice(6)}`;
+    }
+    if (d.length === 11) return `${d.slice(0,3)}-${d.slice(3,7)}-${d.slice(7)}`;   // 010-0000-0000
+    if (d.length === 10) return `${d.slice(0,3)}-${d.slice(3,6)}-${d.slice(6)}`;   // 011-000-0000
+    return raw; // 알 수 없는 길이는 그대로
+}
+
+export { getWeekId, getTeam, isAdmin, esc, isValidHexColor, normalizeColor, getTextColorForBg, getWeekDateRange, getWeeksInMonth, formatWeekLabel, formatPhone };

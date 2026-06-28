@@ -160,7 +160,7 @@ function renderReservationDetails() {
     const _localTeamId = team ? team.id : 'external';
     const teamOptions = [
         `<option value="external" ${_localTeamId === 'external' ? 'selected' : ''}>직접 입력 / 외부 예약</option>`,
-        ...TEAMS.map(t => `<option value="${esc(t.id)}" ${_localTeamId === t.id ? 'selected' : ''}>${esc(t.name)}</option>`)
+        ...S.TEAMS.map(t => `<option value="${esc(t.id)}" ${_localTeamId === t.id ? 'selected' : ''}>${esc(t.name)}</option>`)
     ].join('');
 
     // 신청자 정보 (관리자만)

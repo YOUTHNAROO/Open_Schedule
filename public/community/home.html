@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>유스나루 커뮤니티 · 홈</title>
+<link rel="stylesheet" href="assets/everytime.css?v=9" />
+<script src="../env.js"></script>
+</head>
+<body>
+<div class="app" data-od-id="home">
+  <!-- TOP BAR -->
+  <header class="topbar">
+    <div class="topbar-row">
+      <div class="brand"><span class="mark"><img src="assets/logo/logo.svg?v=9" alt="유" onerror="this.remove();this.parentNode.textContent='유'"></span>유스나루</div>
+      <div style="display:flex;align-items:center;gap:6px;margin-left:auto">
+        <a class="icon-btn" href="../index.html" aria-label="시간표로" title="시간표로 돌아가기"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg></a>
+        <a class="icon-btn bell" href="notifications.html" aria-label="알림"><span class="dot" id="bellDot" style="display:none"></span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg></a>
+      </div>
+    </div>
+    <nav class="tabs" id="tabs"></nav>
+  </header>
+
+  <!-- FEED -->
+  <main class="feed">
+    <a class="compose" id="composeBtn" href="write.html">
+      <span class="ava"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10Zm0 2c-4 0-8 2-8 5v1h16v-1c0-3-4-5-8-5Z"/></svg></span>
+      <span class="ph">지금 무슨 생각을 하고 있나요?</span>
+      <span class="cam"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="6" width="18" height="14" rx="3"/><circle cx="12" cy="13" r="3.5"/><path d="M8 6 9.5 3.5h5L16 6"/></svg></span>
+    </a>
+    <div id="postList"></div>
+  </main>
+
+  <!-- BOTTOM NAV -->
+  <nav class="botnav">
+    <a class="nav-item active" href="home.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 10 9-7 9 7"/><path d="M5 9v11h14V9"/></svg>홈</a>
+    <a class="nav-item" href="board.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h6"/></svg>게시판</a>
+    <a class="nav-item nav-write" href="write.html"><span class="fab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 5v14M5 12h14"/></svg></span></a>
+    <a class="nav-item" href="notifications.html"><span class="ndot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg></span>알림</a>
+    <a class="nav-item" href="profile.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>프로필</a>
+  </nav>
+</div>
+
+<script type="module">
+  import { requireLoginOrRedirect, subscribeFeed, loadBoards, canAccessBoard, getPostImages, fetchFeedPage, subscribeNotifications, syncMyNotifications, toggleLike } from './community-data.js?v=9';
+  import { postCardHTML, emptyHTML, imageGridHTML, esc, toast } from './community-ui.js?v=9';
+
+  const me = await requireLoginOrRedirect();
+
+  // 관리자에게만 관리 콘솔 진입 버튼 노출
+  if (me?.isAdmin) {
+    const a = document.createElement('a');
+    a.className = 'icon-btn'; a.href = 'admin.html'; a.title = '커뮤니티 관리';
+    a.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/></svg>';
+    const bell = document.querySelector('.topbar-row .bell');
+    bell.parentNode.insertBefore(a, bell);
+  }
+
+  const listEl = document.getElementById('postList');
+  const tabsNav = document.getElementById('tabs');
+  let unsub = null;
+
+  // 피드 카드 전체가 <a>라 하트 클릭이 상세이동으로 새던 문제 수정.
+  // 캡처 단계에서 좋아요 클릭을 가로채 토글하고, 링크 이동을 막는다.
+  let _likeBusy = false;
+  listEl.addEventListener('click', async e => {
+    const likeBtn = e.target.closest('.act.like');
+    if (!likeBtn) return;
+    e.preventDefault(); e.stopPropagation();
+    const id = likeBtn.dataset.likeId;
+    if (!id || _likeBusy) return;
+    _likeBusy = true;
+    // 낙관적 UI: onSnapshot 재렌더 전까지 즉시 반영
+    const lc = likeBtn.querySelector('.lc');
+    const wasLiked = likeBtn.classList.contains('liked');
+    likeBtn.classList.toggle('liked', !wasLiked);
+    if (lc) lc.textContent = Math.max(0, (parseInt(lc.textContent, 10) || 0) + (wasLiked ? -1 : 1));
+    try { await toggleLike(id); }
+    catch (err) {
+      likeBtn.classList.toggle('liked', wasLiked);
+      if (lc) lc.textContent = Math.max(0, (parseInt(lc.textContent, 10) || 0) + (wasLiked ? 1 : -1));
+      toast(err?.message || '좋아요에 실패했어요');
+    }
+    finally { _likeBusy = false; }
+  }, true);
+
+  // 접근 가능한(열린) 게시판만 탭으로 렌더
+  const all = await loadBoards();
+  const visible = all.filter(b => canAccessBoard(b, me)).sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
+  tabsNav.innerHTML = visible.map(b =>
+    `<button class="tab" data-board="${esc(b.id)}">${esc(b.name)}${b.id === 'secret' ? '<span class="hot"> ·</span>' : ''}</button>`).join('')
+    || '<span style="padding:12px 14px;font-size:13px;color:var(--faint)">접근 가능한 게시판이 없어요</span>';
+  let tabs = [...tabsNav.querySelectorAll('.tab')];
+
+  let qBoard = new URLSearchParams(location.search).get('board');
+  let board = visible.some(b => b.id === qBoard) ? qBoard : (visible[0]?.id || 'free');
+
+  // 게시판 탭 드래그(마우스/터치)로 가로 스크롤
+  (function enableDragScroll(el) {
+    let down = false, sx = 0, sl = 0, moved = false;
+    el.style.cursor = 'grab';
+    // 가로 드래그가 네이티브 세로 스크롤과 충돌하지 않도록(모바일): 세로만 브라우저에 양보.
+    el.style.touchAction = 'pan-y';
+    el.addEventListener('pointerdown', e => {
+      down = true; moved = false; sx = e.clientX; sl = el.scrollLeft; el.style.cursor = 'grabbing';
+    });
+    el.addEventListener('pointermove', e => {
+      if (!down) return;
+      const dx = e.clientX - sx;
+      if (Math.abs(dx) > 4) moved = true;
+      if (moved) e.preventDefault(); // 드래그 중 네이티브 스크롤/제스처 억제(모바일 오작동 방지)
+      el.scrollLeft = sl - dx;
+    });
+    const end = () => { down = false; el.style.cursor = 'grab'; };
+    el.addEventListener('pointerup', end);
+    el.addEventListener('pointerleave', end);
+    el.addEventListener('pointercancel', end); // 모바일에서 제스처가 취소될 때도 상태 정리
+    // 드래그였다면 직후 click을 캡처 단계에서 삼켜 탭 전환 오발동 방지
+    el.addEventListener('click', e => { if (moved) { e.preventDefault(); e.stopPropagation(); moved = false; } }, true);
+  })(tabsNav);
+
+  // 피드 이미지(base64 하위컬렉션)를 페이스북식 그리드로 하이드레이션
+  const imgCache = new Map();
+  async function hydrateImages() {
+    for (const slot of document.querySelectorAll('.post-imgs:not([data-done])')) {
+      slot.dataset.done = '1';
+      const id = slot.dataset.imgsId;
+      let urls = imgCache.get(id);
+      if (!urls) { urls = await getPostImages(id); imgCache.set(id, urls); }
+      if (urls && urls.length) slot.innerHTML = imageGridHTML(urls);
+    }
+  }
+
+  function activateTab() { tabs.forEach(t => t.classList.toggle('active', t.dataset.board === board)); }
+  function updateWriteLinks() {
+    document.getElementById('composeBtn').href = `write.html?board=${board}`;
+    document.querySelector('.nav-write').href = `write.html?board=${board}`;
+  }
+  function load() {
+    if (unsub) unsub();
+    listEl.innerHTML = emptyHTML('불러오는 중…');
+    updateWriteLinks();
+    unsub = subscribeFeed(board, posts => {
+      listEl.innerHTML = posts.length ? posts.map(postCardHTML).join('') : emptyHTML('아직 글이 없어요. 첫 글을 남겨보세요!');
+      hydrateImages();
+    });
+  }
+  function markSeenIfSecret() {
+    if (board === 'secret') {
+      localStorage.setItem('secretSeen', String(Date.now()));
+      const h = document.querySelector('.tab[data-board="secret"] .hot');
+      if (h) h.classList.remove('on');
+    }
+  }
+  tabs.forEach(t => t.onclick = () => {
+    board = t.dataset.board; activateTab();
+    document.querySelector('.feed').scrollTo({ top: 0, behavior: 'smooth' });
+    markSeenIfSecret();
+    load();
+  });
+
+  activateTab();
+  markSeenIfSecret();
+  load();
+
+  // 알림 빨간 점: 실제로 안 읽은 알림이 있을 때만
+  const bellDot = document.getElementById('bellDot');
+  const navDot = document.querySelector('.botnav .ndot');
+  subscribeNotifications(list => {
+    const unread = list.filter(n => !n.read).length;
+    if (bellDot) bellDot.style.display = unread > 0 ? '' : 'none';
+    if (navDot) navDot.classList.toggle('on', unread > 0);
+  }).catch(() => {});
+
+  // 내 글·번개 변화 → 알림 생성(무과금, 본인 진입 시 동기화)
+  syncMyNotifications().catch(() => {});
+
+  // 비밀게시판 새 글 점: 마지막으로 본 시각 이후 새 글이 있으면 표시
+  try {
+    const latest = (await fetchFeedPage('secret', null, 1))[0];
+    const lastTs = latest?.createdAt?.seconds ? latest.createdAt.seconds * 1000 : 0;
+    const seen = +(localStorage.getItem('secretSeen') || 0);
+    const h = document.querySelector('.tab[data-board="secret"] .hot');
+    if (h && board !== 'secret' && lastTs > seen) h.classList.add('on');
+  } catch {}
+</script>
+</body>
+</html>

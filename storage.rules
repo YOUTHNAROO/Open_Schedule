@@ -6,6 +6,15 @@ service firebase.storage {
       allow read: if true;
       allow write: if request.auth != null;
     }
+    // 커뮤니티 이미지: 누구나 읽기(피드 노출), 쓰기는 본인 uid 경로 + 5MB·이미지 제한
+    //   경로 규칙: community/{uid}/{postId}/{file}
+    match /community/{uid}/{allPaths=**} {
+      allow read: if true;
+      allow write: if request.auth != null
+        && request.auth.uid == uid
+        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
     // 나머지: 인증된 사용자만
     match /{allPaths=**} {
       allow read, write: if request.auth != null;

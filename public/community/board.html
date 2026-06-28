@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>게시판 · 유스나루</title>
+<link rel="stylesheet" href="assets/everytime.css?v=9" />
+<script src="../env.js"></script>
+<style>
+  .bd-ico{background:var(--secondary);color:var(--muted)}
+  .bd-ico.free{background:#eef2ff;color:var(--primary)}
+  .bd-ico.secret{background:#f3e8ff;color:#9333ea}
+  .bd-ico.info{background:#ecfeff;color:#0891b2}
+  .bd-ico.review{background:#fffbeb;color:var(--amber)}
+  .bd-ico.meetup{background:#fff7ed;color:#ea580c}
+  .bd-ico.flex{background:#eff6ff;color:#2563eb}
+  .bd-ico.custom{background:#eef2ff;color:var(--primary)}
+  .bd-ico.admin{background:#fef2f2;color:var(--danger)}
+  .row .rmeta.cnt{background:var(--anon-bg);color:var(--primary);font-weight:800;border-radius:999px;padding:2px 8px;align-self:center;margin-top:0}
+  .search-bar{margin:10px 16px 4px;display:flex;align-items:center;gap:9px;background:var(--surface);border:1.5px solid var(--border);border-radius:13px;padding:11px 14px;color:var(--faint)}
+  .search-bar svg{width:18px;height:18px;flex:0 0 auto}
+  .search-bar input{flex:1;border:0;outline:none;font-size:14px;font-family:inherit;background:transparent;color:var(--fg)}
+  .bbtn{flex:0 0 auto;width:32px;height:32px;border:0;background:transparent;color:var(--faint);border-radius:9px;display:grid;place-items:center;cursor:pointer}
+  .bbtn:hover{background:var(--secondary);color:var(--fg)}
+  .bbtn.del:hover{background:#fef2f2;color:var(--danger)}
+  .bbtn svg{width:16px;height:16px}
+  .feat{font-size:9.5px;font-weight:800;padding:1px 6px;border-radius:5px;margin-left:5px}
+  .feat.rate{color:var(--amber);background:#fffbeb}
+  .feat.noimg{color:var(--faint);background:var(--secondary)}
+  .feat.lock{color:#9333ea;background:#f3e8ff}
+  .bm-field{width:100%;border:1.5px solid var(--border);border-radius:12px;padding:12px 13px;font-size:15px;font-family:inherit;outline:none;margin-top:4px}
+  .bm-field:focus{border-color:var(--primary)}
+  .bm-opt{display:flex;align-items:center;gap:10px;padding:11px 2px;border-top:1px solid var(--line);cursor:pointer}
+  .bm-opt:first-of-type{border-top:0;margin-top:6px}
+  .bm-opt .t{flex:1}.bm-opt .t b{font-size:14px;display:block}.bm-opt .t span{font-size:11.5px;color:var(--faint)}
+  .bm-opt input{width:20px;height:20px;accent-color:var(--primary)}
+</style>
+</head>
+<body>
+<div class="app" data-od-id="board">
+  <header class="pagehead">
+    <span class="title" style="padding-left:12px">게시판</span>
+    <span class="spacer"></span>
+    <button class="back-btn" id="newBoardBtn" aria-label="게시판 만들기" style="display:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg></button>
+  </header>
+
+  <main class="scrollbody" style="padding-bottom:84px">
+    <label class="search-bar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="search" type="search" placeholder="게시판 검색" autocomplete="off" /></label>
+
+    <div class="sec-label">게시판</div>
+    <div id="boardList"></div>
+
+    <div class="sec-label">활동 · 모임</div>
+    <a class="row" href="meetup.html">
+      <span class="ri bd-ico meetup"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="7" r="3"/><path d="M2 21c0-3.5 3-5.5 7-5.5s7 2 7 5.5"/><path d="M17 11l2 2 4-4"/></svg></span>
+      <div class="rt"><b>번개 · 매칭</b><span>지금 비는 시간에 가볍게 모일 번개·1:1 채팅</span></div>
+      <span class="rmeta cnt">NEW</span>
+    </a>
+
+    <div class="sec-label" id="adminLabel" style="display:none">관리자</div>
+    <div id="adminList"></div>
+  </main>
+
+  <nav class="botnav">
+    <a class="nav-item" href="home.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 10 9-7 9 7"/><path d="M5 9v11h14V9"/></svg>홈</a>
+    <a class="nav-item active" href="board.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h6"/></svg>게시판</a>
+    <a class="nav-item nav-write" href="write.html"><span class="fab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 5v14M5 12h14"/></svg></span></a>
+    <a class="nav-item" href="notifications.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>알림</a>
+    <a class="nav-item" href="profile.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>프로필</a>
+  </nav>
+</div>
+
+<!-- 게시판 설정 모달 -->
+<div class="modal-wrap" id="boardModal">
+  <div class="modal-bg" id="bmBg"></div>
+  <div class="modal" style="text-align:left">
+    <h4 id="bmTitle" style="text-align:center;margin-bottom:6px">게시판 만들기</h4>
+    <input id="bmName" class="bm-field" type="text" maxlength="40" placeholder="게시판 이름" />
+    <label class="bm-opt"><div class="t"><b>익명 전용</b><span>닉네임 없이 익명으로만 작성</span></div><input type="checkbox" id="bmAnon" /></label>
+    <label class="bm-opt"><div class="t"><b>사진 첨부 허용</b><span>글에 이미지를 올릴 수 있어요</span></div><input type="checkbox" id="bmImg" checked /></label>
+    <label class="bm-opt"><div class="t"><b>별점 사용</b><span>리뷰형 게시판 (1~5점)</span></div><input type="checkbox" id="bmRate" /></label>
+    <div class="bm-opt" style="display:block">
+      <b style="font-size:14px">접근 권한</b>
+      <label style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:13.5px;cursor:pointer"><input type="radio" name="bmAccess" value="all" checked style="accent-color:var(--primary)"> 전체 공개</label>
+      <label style="display:flex;align-items:center;gap:8px;margin-top:7px;font-size:13.5px;cursor:pointer"><input type="radio" name="bmAccess" value="restricted" style="accent-color:var(--primary)"> 지정 활동단만 접근</label>
+      <div id="bmTeams" style="display:none;margin-top:9px;max-height:150px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:6px 10px"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn ghost" style="flex:1" id="bmCancel">취소</button>
+      <button class="btn primary" style="flex:1" id="bmSave">저장</button>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script type="module">
+  import { requireLoginOrRedirect, loadBoards, ensureBoardsSeeded, createBoard, updateBoard, deleteBoard, getBoardPostCount, getTeams, canAccessBoard } from './community-data.js?v=9';
+  import { esc, toast } from './community-ui.js?v=9';
+
+  const me = await requireLoginOrRedirect();
+  const $ = id => document.getElementById(id);
+
+  const DESC_DEFAULT = { free:'무엇이든 자유롭게', secret:'익명 전용 · 더 솔직하게', info:'꿀팁·공지·자료 공유', review:'별점·후기 아카이브', meetup:'지금 시간 비는 사람 모집', flex:'이번 시즌 시간표 공유' };
+  const ICON = {
+    free:'<path d="M8 10h8M8 14h5M21 12a9 9 0 1 1-3.5-7.1L21 4v5h-5"/>',
+    secret:'<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+    info:'<circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/>',
+    review:'<path d="m12 3 2.9 5.9 6.6 1-4.8 4.6 1.1 6.5L12 18l-5.8 3 1.1-6.5L2.5 9.9l6.6-1L12 3Z"/>',
+    meetup:'<path d="M13 2 4 14h7l-1 8 9-12h-7l1-8Z"/>',
+    flex:'<rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 3v4M16 3v4"/>',
+  };
+  const GENERIC = '<path d="M4 6h16M4 12h16M4 18h10"/>';
+  const TRASH = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>';
+  const GEAR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 1 1-4 0v-.1A1.6 1.6 0 0 0 6 19.4l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0-1.1-2.7H2a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 3.2 6l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H8a1.6 1.6 0 0 0 1-1.5V2a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 2.7 1.1l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V8a1.6 1.6 0 0 0 1.5 1H22a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1Z"/></svg>';
+
+  function rowHTML(b) {
+    const icoKey = b.builtin && ICON[b.id] ? b.id : 'custom';
+    const desc = (b.builtin && DESC_DEFAULT[b.id]) || (b.anonOnly ? '익명 전용 게시판' : '커뮤니티 게시판');
+    let feats = b.anonOnly ? ' <span class="badge-anon">익명전용</span>' : '';
+    if (b.access === 'restricted') feats += ' <span class="feat lock">🔒 활동단</span>';
+    if (b.allowRating) feats += ' <span class="feat rate">★별점</span>';
+    if (b.allowImages === false) feats += ' <span class="feat noimg">사진✕</span>';
+    const admin = me?.isAdmin ? `
+      <button class="bbtn edit" data-id="${esc(b.id)}" aria-label="설정" title="게시판 설정">${GEAR}</button>
+      <button class="bbtn del" data-id="${esc(b.id)}" data-name="${esc(b.name)}" aria-label="삭제" title="게시판 삭제">${TRASH}</button>` : '';
+    return `<a class="row brow" data-name="${esc(b.name)}" href="home.html?board=${esc(b.id)}">
+      <span class="ri bd-ico ${icoKey}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${ICON[b.id] || GENERIC}</svg></span>
+      <div class="rt"><b>${esc(b.name)}${feats}</b><span>${esc(desc)}</span></div>
+      <span class="rmeta cnt cnt-slot" style="visibility:hidden">0</span>
+      ${admin}
+    </a>`;
+  }
+
+  let boards = [];
+  async function render() {
+    const all = await loadBoards();
+    // 일반 사용자는 접근 가능한 게시판만, 관리자는 전체(관리 위해)
+    boards = me?.isAdmin ? all : all.filter(b => canAccessBoard(b, me));
+    $('boardList').innerHTML = boards.length ? boards.map(rowHTML).join('')
+      : '<div style="padding:30px 16px;text-align:center;color:var(--faint);font-size:14px">접근 가능한 게시판이 없습니다.</div>';
+    bindRowButtons();
+    for (const b of boards) {
+      const cnt = await getBoardPostCount(b.id);
+      const el = document.querySelector(`.brow[href="home.html?board=${b.id}"] .cnt-slot`);
+      if (el && cnt != null) { el.textContent = cnt > 99 ? '99+' : cnt; el.style.visibility = 'visible'; }
+    }
+  }
+
+  function bindRowButtons() {
+    document.querySelectorAll('.bbtn.del').forEach(btn => btn.onclick = async (e) => {
+      e.preventDefault(); e.stopPropagation();
+      if (!confirm(`'${btn.dataset.name}' 게시판을 삭제할까요?\n(작성된 글은 사라지지 않지만 목록·탭에서 빠집니다)`)) return;
+      try { await deleteBoard(btn.dataset.id); toast('게시판을 삭제했어요'); render(); } catch (err) { toast(err.message || '삭제 실패'); }
+    });
+    document.querySelectorAll('.bbtn.edit').forEach(btn => btn.onclick = (e) => {
+      e.preventDefault(); e.stopPropagation();
+      openModal(boards.find(b => b.id === btn.dataset.id));
+    });
+  }
+
+  // ── 설정 모달 ──
+  let editingId = null;
+  let TEAMS = [];
+  (async () => { TEAMS = await getTeams(); })();
+
+  function buildTeamChecks(selected = []) {
+    const box = $('bmTeams');
+    if (!TEAMS.length) { box.innerHTML = '<div style="font-size:12px;color:var(--faint);padding:4px">활동단 목록을 불러올 수 없어요.</div>'; return; }
+    box.innerHTML = TEAMS.map(t =>
+      `<label style="display:flex;align-items:center;gap:8px;padding:5px 2px;font-size:13px;cursor:pointer"><input type="checkbox" class="bm-team" value="${esc(t.id)}" ${selected.includes(t.id) ? 'checked' : ''} style="accent-color:var(--primary)"> ${esc(t.name)}</label>`).join('');
+  }
+  function setAccessUI(access) {
+    [...document.querySelectorAll('input[name="bmAccess"]')].forEach(r => r.checked = (r.value === access));
+    $('bmTeams').style.display = access === 'restricted' ? '' : 'none';
+  }
+  [...document.querySelectorAll('input[name="bmAccess"]')].forEach(r => r.onchange = () => { $('bmTeams').style.display = r.value === 'restricted' && r.checked ? '' : 'none'; });
+
+  function openModal(b) {
+    editingId = b ? b.id : null;
+    $('bmTitle').textContent = b ? '게시판 설정' : '게시판 만들기';
+    $('bmName').value = b ? b.name : '';
+    $('bmAnon').checked = b ? !!b.anonOnly : false;
+    $('bmImg').checked = b ? b.allowImages !== false : true;
+    $('bmRate').checked = b ? !!b.allowRating : false;
+    setAccessUI(b?.access === 'restricted' ? 'restricted' : 'all');
+    buildTeamChecks(b?.allowedTeams || []);
+    $('boardModal').classList.add('open');
+    if (!b) setTimeout(() => $('bmName').focus(), 50);
+  }
+  function closeModal() { $('boardModal').classList.remove('open'); }
+  $('bmBg').onclick = $('bmCancel').onclick = closeModal;
+  $('bmSave').onclick = async () => {
+    const access = document.querySelector('input[name="bmAccess"]:checked')?.value || 'all';
+    const allowedTeams = access === 'restricted' ? [...document.querySelectorAll('.bm-team:checked')].map(c => c.value) : [];
+    if (access === 'restricted' && !allowedTeams.length) { toast('접근할 활동단을 1개 이상 선택하세요'); return; }
+    const payload = { name: $('bmName').value, anonOnly: $('bmAnon').checked, allowImages: $('bmImg').checked, allowRating: $('bmRate').checked, access, allowedTeams };
+    $('bmSave').disabled = true;
+    try {
+      if (editingId) { await updateBoard(editingId, payload); toast('게시판 설정을 저장했어요'); }
+      else { await createBoard(payload); toast('게시판을 만들었어요'); }
+      closeModal(); render();
+    } catch (e) { toast(e.message || '저장 실패'); }
+    finally { $('bmSave').disabled = false; }
+  };
+
+  // 검색
+  $('search').oninput = e => {
+    const q = e.target.value.trim().toLowerCase();
+    document.querySelectorAll('.brow').forEach(r => { r.style.display = (!q || r.dataset.name.toLowerCase().includes(q)) ? '' : 'none'; });
+  };
+
+  // 관리자 전용
+  if (me?.isAdmin) {
+    $('newBoardBtn').style.display = '';
+    $('newBoardBtn').onclick = () => openModal(null);
+    $('adminLabel').style.display = '';
+    $('adminList').innerHTML = `<a class="row" href="admin.html">
+      <span class="ri bd-ico admin"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/></svg></span>
+      <div class="rt"><b>커뮤니티 관리</b><span>신고·블라인드·작성자 확인</span></div>
+      <span class="rmeta">›</span></a>`;
+    await ensureBoardsSeeded(); // 최초 1회: 기본 게시판을 DB에 시드(이후 삭제·수정 가능)
+    // 기존 시드된 '공강 번개' → '번개' 1회 정리
+    try { const mb = (await loadBoards()).find(x => x.id === 'meetup'); if (mb && mb.name === '공강 번개') await updateBoard('meetup', { name: '번개' }); } catch {}
+  }
+
+  render();
+</script>
+</body>
+</html>

@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>게시글 · 유스나루</title>
+<link rel="stylesheet" href="assets/everytime.css?v=9" />
+<script src="../env.js"></script>
+<style>
+  .detail-body{flex:1;overflow-y:auto;padding-bottom:88px;background:var(--surface)}
+  .post-full{padding:16px 16px 14px;border-bottom:8px solid var(--secondary)}
+  .post-full h2{font-size:19px;font-weight:800;letter-spacing:-.02em;line-height:1.4;margin:12px 0 8px}
+  .post-full .text{font-size:15px;line-height:1.7;color:#1f2937;white-space:pre-line}
+  .post-full .grid{margin-top:14px}
+  .stat-line{display:flex;gap:14px;color:var(--faint);font-size:12px;font-weight:600;margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
+  .stat-line .s{display:flex;align-items:center;gap:5px}
+  .stat-line .s svg{width:15px;height:15px}
+  .big-actions{display:flex;border-top:1px solid var(--line);border-bottom:1px solid var(--line);margin-top:12px}
+  .big-act{flex:1;display:flex;align-items:center;justify-content:center;gap:7px;background:transparent;border:0;color:var(--muted);font-size:14px;font-weight:700;cursor:pointer;padding:13px 0}
+  .big-act:active{background:var(--secondary)}
+  .big-act svg{width:20px;height:20px}
+  .big-act.liked{color:var(--like)}
+  .big-act.liked svg{fill:var(--like);stroke:var(--like)}
+  .big-act.scrapped{color:var(--primary)}
+  .big-act.scrapped svg{fill:var(--primary);stroke:var(--primary)}
+  .cmt-head{padding:14px 16px 4px;font-size:13px;font-weight:800;color:var(--fg)}
+  .cmt-head span{color:var(--primary)}
+  .cmt{padding:12px 16px;border-bottom:1px solid var(--line);display:flex;gap:10px}
+  .cmt .cbody{flex:1;min-width:0}
+  .cmt .crow{display:flex;align-items:center;gap:7px}
+  .cmt .cname{font-size:13px;font-weight:700}
+  .cmt .cname.author{color:#0369a1}
+  .cmt .ctime{font-size:11px;color:var(--faint);font-weight:500;margin-left:auto}
+  .cmt .ctext{font-size:14px;line-height:1.6;color:#1f2937;margin-top:4px;white-space:pre-line}
+  .cmt .cacts{display:flex;gap:16px;margin-top:7px}
+  .cmt .cact{display:flex;align-items:center;gap:5px;background:transparent;border:0;color:var(--faint);font-size:12px;font-weight:600;cursor:pointer}
+  .cmt .cact svg{width:15px;height:15px}
+  .cmt .cact.liked{color:var(--like)}
+  .cmt .cact.liked svg{fill:var(--like);stroke:var(--like)}
+  .cmt-bar{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:var(--maxw);background:rgba(255,255,255,.97);backdrop-filter:blur(14px);border-top:1px solid var(--border);padding:9px 12px max(9px,env(safe-area-inset-bottom));z-index:40;display:flex;align-items:center;gap:9px}
+  .anon-mini{display:flex;align-items:center;gap:5px;border:0;background:var(--anon-bg);color:var(--anon);border-radius:999px;padding:8px 11px;font-size:12px;font-weight:800;cursor:pointer;flex:0 0 auto}
+  .anon-mini.off{background:var(--secondary);color:var(--muted)}
+  .anon-mini svg{width:15px;height:15px}
+  .cmt-input{flex:1;border:1.5px solid var(--border);border-radius:999px;background:var(--secondary);padding:10px 14px;font-size:14px;font-family:inherit;outline:none}
+  .cmt-input:focus{border-color:var(--anon);background:#fff}
+  .send{width:40px;height:40px;flex:0 0 auto;border:0;border-radius:50%;background:var(--primary);color:#fff;display:grid;place-items:center;cursor:pointer}
+  .send:disabled{background:#cbd5e1;cursor:default}
+  .send svg{width:19px;height:19px}
+</style>
+</head>
+<body>
+<div class="app" data-od-id="post-detail">
+  <header class="pagehead">
+    <a class="back-btn" href="home.html" aria-label="뒤로"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg></a>
+    <span class="title" id="boardTitle">게시판</span>
+    <span class="spacer"></span>
+    <button class="back-btn" id="moreBtn" aria-label="더보기"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.9"/><circle cx="12" cy="12" r="1.9"/><circle cx="19" cy="12" r="1.9"/></svg></button>
+  </header>
+
+  <main class="detail-body">
+    <article class="post-full" id="postFull"></article>
+    <div class="cmt-head">댓글 <span id="cmtHeadN">0</span></div>
+    <div id="cmtList"></div>
+  </main>
+
+  <div class="cmt-bar">
+    <button class="anon-mini" id="anonMini"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C7 2 4 6 4 11c0 3 2 5 4 6 0 2 2 5 4 5s4-3 4-5c2-1 4-3 4-6 0-5-3-9-8-9Z"/></svg>익명</button>
+    <input class="cmt-input" id="cmtInput" type="text" placeholder="따뜻한 댓글을 남겨보세요" />
+    <button class="send" id="sendBtn" disabled aria-label="등록"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7Z"/></svg></button>
+  </div>
+</div>
+
+<div class="sheet-wrap" id="moreSheet">
+  <div class="sheet-bg" id="moreSheetBg"></div>
+  <div class="sheet">
+    <div class="grab"></div>
+    <button class="opt" id="optScrap"><span class="oi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16Z"/></svg></span><span class="ot"><b>스크랩</b><span>나중에 다시 보기</span></span></button>
+    <button class="opt" id="optShare"><span class="oi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12v8h16v-8M12 16V3m0 0L8 7m4-4 4 4"/></svg></span><span class="ot"><b>공유하기</b><span>링크 복사</span></span></button>
+    <button class="opt" id="optReport" style="color:var(--danger)"><span class="oi" style="color:var(--danger)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg></span><span class="ot"><b>신고하기</b><span>신고 5회 누적 시 자동 블라인드</span></span></button>
+  </div>
+</div>
+
+<script type="module">
+  import {
+    requireLoginOrRedirect, getPost, getPostImages, subscribeComments, addComment,
+    toggleLike, hasLiked, toggleScrap, toggleCommentLike, reportPost, boardName, ensureBoardsLoaded
+  } from './community-data.js?v=9';
+  import { avatarHTML, imageGridHTML, authorLabel, timeAgo, esc, toast, linkify } from './community-ui.js?v=9';
+
+  await requireLoginOrRedirect();
+  await ensureBoardsLoaded();
+  const $ = id => document.getElementById(id);
+  const postId = new URLSearchParams(location.search).get('id');
+
+  const HEART_S = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>';
+  const HEART_O = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>';
+  const CHAT_O = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.5 8.5 0 0 1-12.3 7.6L3 21l1.9-5.7A8.5 8.5 0 1 1 21 11.5Z"/></svg>';
+  const SCRAP_O = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16Z"/></svg>';
+
+  if (!postId) { $('postFull').innerHTML = '<p class="text" style="color:var(--faint)">잘못된 접근입니다.</p>'; throw 0; }
+
+  let liked = false, scrapped = false;
+
+  function renderPost(post) {
+    if (!post || post.status === 'BLINDED') {
+      $('postFull').innerHTML = '<p class="text" style="color:var(--faint)">삭제되었거나 블라인드된 글입니다.</p>';
+      return;
+    }
+    $('boardTitle').textContent = boardName(post.board);
+    const badge = post.isAnonymous ? ' <span class="badge-anon">익명</span>' : '';
+    $('postFull').innerHTML = `
+      <div class="post-head" style="margin:0">
+        ${avatarHTML(post, 'lg')}
+        <div>
+          <div class="who">${esc(authorLabel(post))}${badge}</div>
+          <div class="meta">${esc(boardName(post.board))} · ${timeAgo(post.createdAt)} · 조회 ${post.viewCount || 0}${post.rating ? ' · ★ ' + post.rating : ''}</div>
+        </div>
+      </div>
+      ${post.title ? `<h2>${esc(post.title)}</h2>` : ''}
+      <p class="text">${linkify(esc(post.content || ''))}</p>
+      <div id="postImages"></div>
+      <div class="stat-line">
+        <span class="s">${HEART_S}<span id="likeStat">${post.likeCount || 0}</span></span>
+        <span class="s">${CHAT_O}<span id="cmtStat">${post.commentCount || 0}</span></span>
+        <span class="s">${SCRAP_O}<span id="scrapStat">${post.scrapCount || 0}</span></span>
+      </div>
+      <div class="big-actions">
+        <button class="big-act${liked ? ' liked' : ''}" id="likeBtn">${liked ? HEART_S : HEART_O}공감</button>
+        <button class="big-act" id="cmtFocus">${CHAT_O}댓글</button>
+        <button class="big-act${scrapped ? ' scrapped' : ''}" id="scrapBtn">${SCRAP_O}스크랩</button>
+      </div>`;
+    $('likeBtn').onclick = onLike;
+    $('scrapBtn').onclick = onScrap;
+    $('cmtFocus').onclick = () => $('cmtInput').focus();
+  }
+
+  // 댓글 1개 렌더. isReply=true 면 답글(들여쓰기/연한 배경). 답글에는 "답글" 버튼 없음(1단계 제한).
+  function commentHTML(c, isReply = false) {
+    const isOp = c.isOp;
+    const name = authorLabel(c);
+    const av = avatarHTML(c, 'sm');
+    const badge = isOp ? '<span class="badge-author">글쓴이</span>' : '';
+    const replyBtn = isReply ? '' :
+      `<button class="cact reply-btn" data-reply-id="${esc(c.id)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 17H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-4l-4 4z"/></svg>답글</button>`;
+    const replyBox = isReply ? '' : `
+      <div class="reply-box" data-reply-box="${esc(c.id)}">
+        <button class="anon-mini" data-ranon="${esc(c.id)}"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C7 2 4 6 4 11c0 3 2 5 4 6 0 2 2 5 4 5s4-3 4-5c2-1 4-3 4-6 0-5-3-9-8-9Z"/></svg>익명</button>
+        <input type="text" placeholder="답글을 입력하세요" data-rinput="${esc(c.id)}" />
+        <button class="rsend" data-rsend="${esc(c.id)}" disabled>등록</button>
+      </div>`;
+    return `
+    <div class="cmt${isReply ? ' reply' : ''}" data-id="${esc(c.id)}">
+      ${av}
+      <div class="cbody">
+        <div class="crow"><span class="cname${isOp ? ' author' : ''}">${esc(name)}</span>${badge}<span class="ctime">${timeAgo(c.createdAt)}</span></div>
+        <p class="ctext">${linkify(esc(c.content || ''))}</p>
+        <div class="cacts">
+          <button class="cact cmt-like"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg><span>${c.likeCount || 0}</span></button>
+          ${replyBtn}
+        </div>
+      </div>
+    </div>${replyBox}`;
+  }
+
+  const ANON_MINI_ON = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C7 2 4 6 4 11c0 3 2 5 4 6 0 2 2 5 4 5s4-3 4-5c2-1 4-3 4-6 0-5-3-9-8-9Z"/></svg>익명';
+  const ANON_MINI_OFF = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10Zm0 2c-4 0-8 2-8 5v1h16v-1c0-3-4-5-8-5Z"/></svg>닉네임';
+
+  // 본문 로드(+조회수)
+  const post = await getPost(postId);
+  liked = await hasLiked(postId);
+  renderPost(post);
+
+  // 이미지(하위컬렉션 base64)는 상세에서만 로드
+  if (post && post.imageCount > 0) {
+    const urls = await getPostImages(postId);
+    const box = document.getElementById('postImages');
+    if (box && urls.length) box.innerHTML = imageGridHTML(urls);
+  }
+
+  // 좋아요/스크랩
+  async function onLike() {
+    liked = await toggleLike(postId);
+    const b = $('likeBtn'); b.classList.toggle('liked', liked); b.innerHTML = (liked ? HEART_S : HEART_O) + '공감';
+    b.onclick = onLike;
+    const st = $('likeStat'); if (st) st.textContent = Math.max(0, (+st.textContent) + (liked ? 1 : -1));
+  }
+  async function onScrap() {
+    scrapped = await toggleScrap(postId);
+    const b = $('scrapBtn'); b.classList.toggle('scrapped', scrapped);
+    toast(scrapped ? '스크랩에 저장했어요' : '스크랩을 해제했어요');
+    const st = $('scrapStat'); if (st) st.textContent = Math.max(0, (+st.textContent) + (scrapped ? 1 : -1));
+  }
+
+  // 댓글 익명 토글(메인 입력) — 답글 기본 익명값으로도 재사용
+  let cmtAnon = true;
+  $('anonMini').onclick = () => {
+    cmtAnon = !cmtAnon;
+    const m = $('anonMini'); m.classList.toggle('off', !cmtAnon);
+    m.innerHTML = cmtAnon ? ANON_MINI_ON : ANON_MINI_OFF;
+  };
+
+  // 답글 박스별 익명 상태 저장(commentId → bool)
+  const replyAnon = new Map();
+
+  // 댓글 실시간 — 최상위 댓글 + 그 아래 답글 중첩 렌더
+  subscribeComments(postId, list => {
+    const sorted = [...list].sort((a, b) => (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0));
+    const tops = sorted.filter(c => !c.parentCommentId);
+    const repliesBy = {};
+    sorted.forEach(c => { if (c.parentCommentId) (repliesBy[c.parentCommentId] ||= []).push(c); });
+    $('cmtList').innerHTML = tops.map(c =>
+      commentHTML(c, false) + (repliesBy[c.id] || []).map(r => commentHTML(r, true)).join('')
+    ).join('');
+    $('cmtHeadN').textContent = list.length;
+    const cs = $('cmtStat'); if (cs) cs.textContent = list.length;
+
+    [...document.querySelectorAll('#cmtList .cmt-like')].forEach(btn => {
+      const id = btn.closest('.cmt').dataset.id;
+      btn.onclick = async () => { btn.classList.add('liked'); btn.querySelector('svg').setAttribute('fill', 'currentColor'); try { await toggleCommentLike(postId, id); } catch {} };
+    });
+
+    // 답글 토글 + 익명 토글 + 등록
+    [...document.querySelectorAll('#cmtList .reply-btn')].forEach(btn => {
+      const id = btn.dataset.replyId;
+      btn.onclick = () => {
+        const box = document.querySelector(`.reply-box[data-reply-box="${id}"]`);
+        if (box) { box.classList.toggle('open'); if (box.classList.contains('open')) box.querySelector('input')?.focus(); }
+      };
+    });
+    [...document.querySelectorAll('#cmtList .anon-mini[data-ranon]')].forEach(m => {
+      const id = m.dataset.ranon;
+      if (!replyAnon.has(id)) replyAnon.set(id, true);
+      m.classList.toggle('off', !replyAnon.get(id));
+      m.innerHTML = replyAnon.get(id) ? ANON_MINI_ON : ANON_MINI_OFF;
+      m.onclick = () => {
+        const v = !replyAnon.get(id); replyAnon.set(id, v);
+        m.classList.toggle('off', !v); m.innerHTML = v ? ANON_MINI_ON : ANON_MINI_OFF;
+      };
+    });
+    [...document.querySelectorAll('#cmtList input[data-rinput]')].forEach(inp => {
+      const id = inp.dataset.rinput;
+      const send = document.querySelector(`.rsend[data-rsend="${id}"]`);
+      inp.oninput = () => { if (send) send.disabled = inp.value.trim().length === 0; };
+      const submit = async () => {
+        const txt = inp.value.trim(); if (!txt) return;
+        if (send) send.disabled = true;
+        try {
+          await addComment(postId, { content: txt, isAnonymous: replyAnon.get(id) !== false, parentCommentId: id });
+          inp.value = '';
+          toast('답글이 등록되었어요');
+        } catch (e) { toast(e.message || '답글 등록 실패'); if (send) send.disabled = false; }
+      };
+      if (send) send.onclick = submit;
+      inp.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); });
+    });
+  });
+
+  // 댓글 등록
+  $('cmtInput').oninput = () => { $('sendBtn').disabled = $('cmtInput').value.trim().length === 0; };
+  async function send() {
+    const txt = $('cmtInput').value.trim(); if (!txt) return;
+    $('sendBtn').disabled = true;
+    try {
+      await addComment(postId, { content: txt, isAnonymous: cmtAnon });
+      $('cmtInput').value = '';
+      const db = document.querySelector('.detail-body');
+      setTimeout(() => db.scrollTo({ top: db.scrollHeight, behavior: 'smooth' }), 200);
+      toast('댓글이 등록되었어요');
+    } catch (e) { toast(e.message || '댓글 등록 실패'); $('sendBtn').disabled = false; }
+  }
+  $('sendBtn').onclick = send;
+  $('cmtInput').addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
+
+  // 더보기 시트
+  $('moreBtn').onclick = () => $('moreSheet').classList.add('open');
+  $('moreSheetBg').onclick = () => $('moreSheet').classList.remove('open');
+  $('optScrap').onclick = () => { $('moreSheet').classList.remove('open'); onScrap(); };
+  $('optShare').onclick = () => { $('moreSheet').classList.remove('open'); navigator.clipboard?.writeText(location.href); toast('링크를 복사했어요'); };
+  $('optReport').onclick = async () => {
+    $('moreSheet').classList.remove('open');
+    try {
+      const r = await reportPost(postId, '부적절한 게시물');
+      if (r?.duplicate) toast('이미 신고한 게시글이에요');
+      else if (r?.blinded) toast('신고 누적으로 블라인드 처리되었어요');
+      else toast('신고가 접수되었어요');
+    } catch (e) { toast(e.message || '신고 실패'); }
+  };
+</script>
+</body>
+</html>

@@ -1,6 +1,10 @@
 import { supabase, dbInsert, dbGetMany, dbDelete } from './supabase.js';
 import S from './state.js';
-import { getWeekId } from './utils.js';
+import { getWeekId, getTeam, isAdmin } from './utils.js';
+import { showToast, showConfirm, expandHourRange } from './ui.js';
+import { addActivityLog } from './logging.js';
+import { syncGoogleSheets } from './sheets.js';
+import { updateMergedReservationsAndRender } from './data.js';
 
 // ==================== FIXED SCHEDULES ====================
 async function addFixedScheduleRange({ teamId, day, room, startHour, endHour, note }) {
@@ -22,6 +26,8 @@ async function addFixedScheduleRange({ teamId, day, room, startHour, endHour, no
             data: { note: note || '', createdBy: S.currentUser.displayName },
         });
         await addActivityLog('고정일정_추가', `${day} ${startHour}~${endHour} ${room}`, null, fsData);
+        S.fixedSchedules.push({ id: fsData.teamId + '-' + day + '-' + room + '-' + startHour + '-' + endHour, teamId, teamName: team.name, day, room, startHour, endHour, note: note || '', createdBy: S.currentUser.displayName });
+        updateMergedReservationsAndRender();
         showToast('고정 일정이 추가되었습니다.', 'success');
         hrs.forEach(h => {
             syncGoogleSheets('reserve', day, h, room, team.name, '고정 일정', note || '');

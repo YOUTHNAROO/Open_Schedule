@@ -2,9 +2,9 @@ import { auth, onAuthStateChanged, signOut } from './firebase.js';
 import { supabase, dbGet, dbInsert, dbDelete } from './supabase.js';
 import S from './state.js';
 import { HOURS, ALL_ROOMS, DAYS } from './constants.js';
-import { esc, isAdmin, getTeam } from './utils.js';
+import { esc, isAdmin, getTeam, formatWeekLabel } from './utils.js';
 import { showToast, showModal, hideModal, showConfirm, fetchClientIP } from './ui.js';
-import { loginUser, doLogout, updateHeader, switchLoginTab, handleRegister, handleRecovery1, handleRecovery2, handleRecovery3, handlePasswordChange, handleLoginSubmit, SECURITY_QUESTIONS } from './auth.js';
+import { loginUser, doLogout, updateHeader, switchLoginTab, handleRegister, handleRecovery1, handleRecovery2, handleRecovery3, handlePasswordChange, handleLoginSubmit, SECURITY_QUESTIONS, migrateLegacyUserToSupabase } from './auth.js';
 import { initData, clearAllSubscriptions } from './data.js';
 import { initOneSignal } from './push.js';
 import { markAllNotifsRead, toggleNotifPanel } from './notifications.js';
@@ -19,7 +19,7 @@ async function initApp() {
     fetchClientIP(); // background
 
     const weekEl = document.getElementById('week-display');
-    if (weekEl) weekEl.textContent = S.currentWeekId;
+    if (weekEl) weekEl.textContent = formatWeekLabel(S.currentWeekId);
 
     renderDayTabs();
     updateHeader();
@@ -139,6 +139,13 @@ async function initApp() {
                     userRow = await dbGet('app_users', { id: user.uid });
                 }
 
+                // Bug 3 fix: 세션 복원 시에도 레거시 Firestore 사용자 자동 이관 (기존엔 loginUser에서만 처리)
+                if (!userRow) {
+                    try {
+                        userRow = await migrateLegacyUserToSupabase(user.uid, user.email?.split('@')[0] || '', user.email || '');
+                    } catch {}
+                }
+
                 if (userRow && userRow.is_active) {
                     S.currentUser = {
                         id: user.uid,
@@ -198,12 +205,14 @@ async function initApp() {
             S.currentUser = null;
             S.selectedTeamId = null;
             clearAllSubscriptions();
-            updateHeader();
-            renderTeamSelectors();
-            renderAdminSection();
-            renderTable();
-            renderMobileTeamSelectors(); updateMobileBottomBar();
-            setTimeout(() => showModal('login-modal'), 400);
+            showModal('login-modal'); // 먼저 로그인 화면을 띄워 빈 화면 방지
+            try {
+                updateHeader();
+                renderTeamSelectors();
+                renderAdminSection();
+                renderTable();
+                renderMobileTeamSelectors(); updateMobileBottomBar();
+            } catch (e) { console.error('로그아웃 화면 렌더 에러:', e); }
         }
     });
 

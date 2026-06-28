@@ -6,6 +6,7 @@ import { showToast, showModal, hideModal, showConfirm, expandHourRange, setupPer
 import { addActivityLog } from './logging.js';
 import { syncGoogleSheets } from './sheets.js';
 import { sendMentionNotifications } from './notifications.js';
+import { updateMergedReservationsAndRender } from './data.js';
 
 // ── helpers ──────────────────────────────────────────────────
 function resRowPayload(resData, weekId, dayId, key) {
@@ -215,12 +216,17 @@ async function cancelReservation(hour, room) {
             const rows = await dbGetMany('fixed_schedules', {});
             const toDelete = rows.filter(d => d.day === S.activeDay && d.room === room && expandHourRange(d.start_hour, d.end_hour).includes(hour));
             for (const d of toDelete) await dbDelete('fixed_schedules', { id: d.id });
+            S.fixedSchedules = S.fixedSchedules.filter(fs =>
+                !(fs.day === S.activeDay && fs.room === room && expandHourRange(fs.startHour, fs.endHour).includes(hour))
+            );
         } else {
             const cancelLabel = forced ? '[강제 취소]' : '[예약 취소]';
             const cancelLogMsg = `${cancelLabel} ${S.currentUser.displayName || S.currentUser.username}${cancelNote ? ` · 사유: ${cancelNote}` : ''}`;
             await addComment(key, cancelLogMsg, { isLog: true });
             await dbDelete('reservations', { key, week_id: S.currentWeekId, day_id: S.activeDay });
+            delete S.rawReservations[key];
         }
+        updateMergedReservationsAndRender();
         const targetDesc = `${S.activeDay} ${hour} ${room} [기존: ${existing.teamName} / 예약자: ${existing.userName}]`;
         await addActivityLog(action, targetDesc, existing, cancelNote ? { note: cancelNote } : null);
         notifyTeamLead(existing.teamId, '예약 취소', `${S.activeDay} ${hour} ${room}`);

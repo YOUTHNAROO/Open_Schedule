@@ -31,19 +31,9 @@
             serviceWorkerPath: '/OneSignalSDKWorker.js',
             allowLocalhostAsSecureOrigin: true,
             notifyButton: { enable: false },
-            promptOptions: {
-              slidedown: {
-                prompts: [{
-                  type: 'push',
-                  autoPrompt: true,
-                  text: {
-                    actionMessage: '유스나루 예약 알림을 받으시겠습니까? 예약·취소 시 실시간으로 알려드립니다.',
-                    acceptButton: '허용',
-                    cancelButton: '나중에',
-                  }
-                }]
-              }
-            }
+            // 자동 슬라이드다운(OneSignal 브랜드 오버레이) 비활성화 —
+            // 사용자가 직접 '허용' 버튼을 눌렀을 때만 브라우저 네이티브 권한창을 띄운다(js/push.js).
+            autoResubscribe: true,
           });
           window.__osPushOk = true;
         } catch(e) {
@@ -591,6 +581,38 @@
             <!-- ---- 회원가입 폼 ---- -->
             <div id="lform-register" class="hidden p-5 max-h-[70vh] overflow-y-auto">
                 <form id="register-form" class="flex flex-col gap-3">
+                    <!-- 표시명 미리보기 (자동 계산) -->
+                    <div class="bg-teal-50 border border-teal-200 rounded-xl p-3">
+                        <label class="block text-xs font-semibold text-teal-700 mb-1">표시명 (자동 생성)</label>
+                        <input id="reg-dispname" type="text" readonly placeholder="이름을 입력하면 자동으로 생성됩니다"
+                            class="w-full px-3 py-2 text-sm font-bold text-teal-800 bg-white border border-teal-200 rounded-xl focus:outline-none placeholder-slate-300">
+                        <p id="reg-dispname-hint" class="text-[10px] text-teal-600 mt-1">초대코드를 입력하면 소속/부서가 표시명에 반영됩니다.</p>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">초대코드 *</label>
+                        <input id="reg-invite" type="text" placeholder="관리자에게 받은 코드 입력" required autocomplete="off"
+                            class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400 uppercase tracking-widest">
+                        <p id="reg-invite-status" class="hidden text-[10px] mt-1"></p>
+                    </div>
+                    <!-- 청소년/직원 구분 (초대코드로 결정, 읽기전용 뱃지) -->
+                    <div id="reg-usertype-wrap" class="hidden">
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">구분</label>
+                        <span id="reg-usertype-badge" class="inline-flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-full"></span>
+                        <input type="hidden" id="reg-usertype" value="youth">
+                    </div>
+                    <!-- 소속 (청소년: 초대코드의 팀, 읽기전용) -->
+                    <div id="reg-team-wrap" class="hidden">
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">소속 활동단</label>
+                        <input id="reg-teamname" type="text" readonly
+                            class="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none text-slate-700">
+                    </div>
+                    <!-- 부서 (청소년: select / 직원: free text) -->
+                    <div id="reg-dept-wrap" class="hidden">
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">부서</label>
+                        <select id="reg-dept-select" class="hidden w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400 bg-white"></select>
+                        <input id="reg-dept-input" type="text" placeholder="부서명 입력 (선택)" autocomplete="off"
+                            class="hidden w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400">
+                    </div>
                     <div class="grid grid-cols-2 gap-2">
                         <div>
                             <label class="block text-xs font-semibold text-slate-600 mb-1">아이디 *</label>
@@ -598,8 +620,8 @@
                                 class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400 placeholder-slate-300">
                         </div>
                         <div>
-                            <label class="block text-xs font-semibold text-slate-600 mb-1">표시 이름 *</label>
-                            <input id="reg-dispname" type="text" placeholder="홍길동" required
+                            <label class="block text-xs font-semibold text-slate-600 mb-1">이름 *</label>
+                            <input id="reg-name" type="text" placeholder="홍길동" required
                                 class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400 placeholder-slate-300">
                         </div>
                     </div>
@@ -612,11 +634,6 @@
                         <label class="block text-xs font-semibold text-slate-600 mb-1">비밀번호 확인 *</label>
                         <input id="reg-password2" type="password" placeholder="비밀번호 재입력" required
                             class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400">
-                    </div>
-                    <div>
-                        <label class="block text-xs font-semibold text-slate-600 mb-1">초대코드 *</label>
-                        <input id="reg-invite" type="text" placeholder="관리자에게 받은 코드 입력" required autocomplete="off"
-                            class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400 uppercase tracking-widest">
                     </div>
                     <div>
                         <label class="block text-xs font-semibold text-slate-600 mb-1">연락처 * (휴대폰 번호)</label>

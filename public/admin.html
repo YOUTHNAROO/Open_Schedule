@@ -10,6 +10,8 @@
   <link rel="shortcut icon" href="favicon.ico?v=5" type="image/x-icon">
   <link rel="icon" href="favicon.png?v=5" type="image/png" sizes="512x512">
   <link rel="apple-touch-icon" href="apple-touch-icon.png?v=5">
+  <!-- 환경변수: supabase.js가 window.ENV를 사용하므로 모듈보다 먼저 로드해야 함 -->
+  <script src="/env.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/lucide@latest"></script>
   <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
@@ -25,6 +27,8 @@
       createUserWithEmailAndPassword, updatePassword
     } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
     import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
+    // Supabase로 데이터 통일 중 — 유저/팀/초대코드는 Supabase, 자격증명은 Firebase Auth.
+    import { dbGet, dbGetMany, dbInsert, dbUpdate, dbDelete } from './js/supabase.js';
 
     // ========== FIREBASE CONFIG ==========
     const firebaseConfig = {
@@ -199,55 +203,61 @@
     }
 
     // ========== AUTH ==========
+    // 레거시 Firestore 사용자를 Supabase로 자동 이관(메인앱 auth.js와 동일 패턴).
+    async function adminMigrateLegacyUser(uid, email) {
+      let legacy = null;
+      try { legacy = (await getDoc(doc(db, 'users', uid))).data() || null; } catch {}
+      if (!legacy) return null;
+      const uname = legacy.username || email.split('@')[0];
+      let rec = {};
+      try { rec = (await getDoc(doc(db, 'user_recovery', uname))).data() || {}; } catch {}
+      const row = {
+        id: uid, email, username: uname,
+        display_name: legacy.displayName || uname, name: legacy.displayName || uname,
+        role: legacy.role || 'user', allowed_teams: legacy.allowedTeams || [],
+        is_active: legacy.isActive !== false, phone: legacy.phone || null,
+        created_by: legacy.createdBy || 'legacy-migration',
+        data: {
+          ...(legacy.photoUrl ? { photoUrl: legacy.photoUrl } : {}),
+          ...(rec.securityQuestion ? { securityQuestion: rec.securityQuestion } : {}),
+          ...(rec.securityAnswerHash ? { securityAnswerHash: rec.securityAnswerHash } : {}),
+          ...(rec.encryptedPassword ? { encryptedPassword: rec.encryptedPassword } : {}),
+          migratedFromFirestore: true,
+        },
+      };
+      try { await dbInsert('app_users', row); } catch (e) { console.warn('[admin migrate]', e?.message); }
+      return await dbGet('app_users', { id: uid });
+    }
+
     async function loginUser(username, password) {
       const email = username.includes('@') ? username : `${username}@youthnaroo.local`;
-      
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
 
-      const userDocRef = doc(db, 'users', user.uid);
-      let userDocSnap = await getDoc(userDocRef);
+      // 사용자 데이터는 Supabase app_users가 단일 출처
+      let row = await dbGet('app_users', { id: user.uid });
 
-      // 초기화 폴백: 만약 최초 주관리자 계정(admin@youthnaroo.local)인데 Firestore에 문서가 없다면 자동 생성
-      if (!userDocSnap.exists() && email === 'admin@youthnaroo.local') {
-        const initialAdmin = {
-          username: 'admin',
-          displayName: '시스템관리자',
-          role: 'superadmin',
-          allowedTeams: [],
-          isActive: true,
-          createdAt: serverTimestamp(),
-          createdBy: 'system'
-        };
-        await setDoc(userDocRef, initialAdmin);
-        userDocSnap = await getDoc(userDocRef);
+      // 최초 주관리자 폴백
+      if (!row && email === 'admin@youthnaroo.local') {
+        await dbInsert('app_users', {
+          id: user.uid, email, username: 'admin',
+          display_name: '시스템관리자', name: '시스템관리자',
+          role: 'superadmin', allowed_teams: [], is_active: true,
+          created_by: 'system', data: {},
+        });
+        row = await dbGet('app_users', { id: user.uid });
       }
+      // 레거시 Firestore 계정 자동 이관
+      if (!row) row = await adminMigrateLegacyUser(user.uid, email);
 
-      if (!userDocSnap.exists()) {
-        await signOut(auth);
-        throw new Error('등록되지 않은 사용자입니다. 관리자에게 문의하세요.');
-      }
+      if (!row) { await signOut(auth); throw new Error('등록되지 않은 사용자입니다. 관리자에게 문의하세요.'); }
+      if (row.is_active === false) { await signOut(auth); throw new Error('비활성화된 계정입니다. 관리자에게 문의하세요.'); }
+      // signOut 제거: 일반유저가 admin.html에서 로그인 시도 시 index.html 세션이 끊기는 버그 방지
+      if (row.role !== 'admin' && row.role !== 'superadmin') { throw new Error('관리자 권한이 없습니다. 일반 예약 페이지(index.html)에서 로그인하세요.'); }
 
-      const userData = userDocSnap.data();
-      if (!userData.isActive) {
-        await signOut(auth);
-        throw new Error('비활성화된 계정입니다. 관리자에게 문의하세요.');
-      }
-
-      if (userData.role !== 'admin' && userData.role !== 'superadmin') {
-        await signOut(auth);
-        throw new Error('관리자 권한이 없습니다.');
-      }
-
-      await addLoginLog(user.uid, userData.username, 'login', userData.displayName);
-
-      return {
-        id: user.uid,
-        username: userData.username,
-        displayName: userData.displayName,
-        role: userData.role,
-        allowedTeams: userData.allowedTeams || []
-      };
+      const displayName = row.display_name || row.name || row.username;
+      await addLoginLog(user.uid, row.username, 'login', displayName);
+      return { id: user.uid, username: row.username, displayName, role: row.role, allowedTeams: row.allowed_teams || [] };
     }
 
     async function doLogout() {
@@ -282,26 +292,64 @@
 
     // ========== DATA ==========
     async function loadTeams() {
+      // 활동단은 Supabase teams 테이블이 단일 출처. (예전 Firestore 읽기는 마이그레이션 후 빈 결과라
+      // '지정활동단 불러올 수 없음' 버그의 원인이었음.) snake_case → 기존 UI가 쓰는 camelCase로 매핑.
       try {
-        const s = await getDocs(collection(db, 'teams'));
-        if (!s.empty) {
-          TEAMS = [];
-          s.forEach(d => TEAMS.push({ id: d.id, ...d.data() }));
-        } else {
-          const batch = writeBatch(db);
-          DEFAULT_TEAMS.forEach(team => {
-            const ref = doc(db, 'teams', team.id);
-            batch.set(ref, { ...team, createdAt: serverTimestamp() });
-          });
-          await batch.commit();
-          TEAMS = [...DEFAULT_TEAMS];
-        }
+        const rows = await dbGetMany('teams', {}, { orderBy: 'name', asc: true });
+        TEAMS = (rows || []).map(r => {
+          const def = DEFAULT_TEAMS.find(t => t.id === r.id) || {};
+          return {
+            id: r.id,
+            name: r.name,
+            shortName: r.short_name || '',
+            fullType: r.full_type ?? def.fullType ?? '',
+            schedule: r.team_schedule ?? def.schedule ?? '',
+            typicalRooms: r.typical_rooms || def.typicalRooms || [],
+            bg: r.bg || def.bg || 'bg-slate-100',
+            text: r.text_class || def.text || 'text-slate-700',
+            border: r.border_class || def.border || 'border-slate-300',
+            isActive: r.is_active !== false,
+            leaderIds: r.leader_ids || [],
+            slackWebhookUrl: r.slack_webhook_url || '',
+            deptConfig: r.dept_config || { enabled: false, list: [] },
+          };
+        });
       } catch (e) { console.error('활동단 로드 에러:', e); }
     }
 
     async function loadUsers() {
-      const s = await getDocs(collection(db, 'users'));
-      return s.docs.map(d => ({ id: d.id, ...d.data() }));
+      // 사용자는 Supabase app_users가 단일 출처. snake_case → 기존 UI가 쓰는 camelCase로 매핑.
+      const rows = await dbGetMany('app_users', {}, { orderBy: 'username', asc: true });
+      return (rows || []).map(r => ({
+        id: r.id,
+        username: r.username,
+        displayName: r.display_name || r.name || r.username,
+        name: r.name || r.display_name || r.username,
+        role: r.role,
+        allowedTeams: r.allowed_teams || [],
+        isActive: r.is_active !== false,
+        phone: r.phone || '',
+        photoUrl: (r.data && r.data.photoUrl) || '',
+        department: (r.data && r.data.department) || '',
+        userType: (r.data && r.data.userType) || 'youth',
+        data: r.data || {},
+      }));
+    }
+
+    // ── Edge Function 호출 (Firebase Auth 계정 제어: 완전삭제·비번재설정) ──────────
+    // Supabase Edge Function `admin-auth`가 Firebase Admin SDK로 처리. 미배포 시 명확한 에러.
+    async function callAdminAuthFn(action, payload) {
+      const idToken = await auth.currentUser.getIdToken();
+      const res = await fetch(`${window.ENV.SUPABASE_URL}/functions/v1/admin-auth`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${window.ENV.SUPABASE_ANON_KEY}` },
+        body: JSON.stringify({ action, idToken, ...payload }),
+      });
+      if (!res.ok) {
+        const msg = await res.text().catch(() => '');
+        throw new Error(`서버 함수 오류(${res.status}): ${msg || 'admin-auth 미배포이거나 권한 없음'}`);
+      }
+      return res.json().catch(() => ({}));
     }
 
     async function loadLoginLogs(page = 1) {
@@ -318,27 +366,78 @@
       return { logs: all.slice((page - 1) * PAGE_SIZE), total: all.length };
     }
 
-    // ========== USER CRUD ==========
-    async function createUser({ username, displayName, password, role, allowedTeams, isActive, photoUrl, phone }) {
+    // 표시명 계산(회원가입 측 auth.js의 computeDisplayName과 동일 계약).
+    // staff: department ? `${department}/${name}` : `${name}`
+    // youth: team&&dept → `${team}/${dept}/${name}` · team → `${team}/${name}` · else `${name}`
+    function computeDisplayName({ userType, teamName, department, name } = {}) {
+      const nm = (name || '').trim(), dept = (department || '').trim(), team = (teamName || '').trim();
+      if (userType === 'staff') return dept ? `${dept}/${nm}` : `${nm}`;
+      if (team && dept) return `${team}/${dept}/${nm}`;
+      if (team) return `${team}/${nm}`;
+      return `${nm}`;
+    }
+
+    // 휴대폰 번호 자동 하이픈(010-0000-0000). auth.js/utils.js와 동일 규칙.
+    function formatPhone(raw) {
+      const d = String(raw || '').replace(/[^0-9]/g, '');
+      if (!d) return '';
+      if (d.startsWith('02')) {
+        if (d.length === 9)  return `${d.slice(0,2)}-${d.slice(2,5)}-${d.slice(5)}`;
+        if (d.length === 10) return `${d.slice(0,2)}-${d.slice(2,6)}-${d.slice(6)}`;
+      }
+      if (d.length === 11) return `${d.slice(0,3)}-${d.slice(3,7)}-${d.slice(7)}`;
+      if (d.length === 10) return `${d.slice(0,3)}-${d.slice(3,6)}-${d.slice(6)}`;
+      return raw;
+    }
+
+    // ========== USER CRUD (Supabase app_users + Firebase Auth 자격증명) ==========
+    async function createUser({ username, displayName, name, password, role, allowedTeams, isActive, photoUrl, phone, department, userType }) {
       const email = `${username}@youthnaroo.local`;
 
-      // 보조 앱을 사용하여 관리자 세션 유지하며 계정 생성
+      // 중복 아이디 확인(is_active 포함 — 소프트삭제된 계정은 재생성 허용)
+      const existingRows = await dbGetMany('app_users', { username });
+      const existing = existingRows?.[0];
+      if (existing) {
+        if (existing.is_active !== false) throw new Error('이미 사용 중인 아이디입니다.');
+        throw new Error('비활성화된 계정입니다. 재활성화하거나 완전삭제 후 새로 추가하세요.');
+      }
+
+      // 보조 앱으로 관리자 세션 유지하며 Firebase Auth 계정 생성(자격증명은 Firebase)
       const secondaryApp = initializeApp(firebaseConfig, "SecondaryApp_" + Date.now());
       const secondaryAuth = getAuth(secondaryApp);
-
       try {
-        const q = query(collection(db, 'users'), where('username', '==', username));
-        if (!(await getDocs(q)).empty) throw new Error('이미 사용 중인 아이디입니다.');
+        let newUid;
+        try {
+          const userCredential = await createUserWithEmailAndPassword(secondaryAuth, email, password);
+          newUid = userCredential.user.uid;
+        } catch (fireErr) {
+          if (fireErr.code === 'auth/email-already-in-use') {
+            // 소프트삭제 후 완전삭제 안 된 계정의 Firebase Auth가 잔존하는 경우 — UID 조회 후 재사용
+            try {
+              const { uid: danglingUid } = await callAdminAuthFn('lookupUserByEmail', { email });
+              if (!danglingUid) throw new Error('Firebase 계정 조회 실패');
+              await callAdminAuthFn('setPassword', { uid: danglingUid, password });
+              newUid = danglingUid;
+            } catch (e2) {
+              throw new Error('아이디가 Firebase에 남아 있습니다. 완전삭제 후 재생성하거나 관리자에게 문의하세요. (' + e2.message + ')');
+            }
+          } else throw fireErr;
+        }
+        await secondaryAuth.signOut().catch(() => {});
 
-        const userCredential = await createUserWithEmailAndPassword(secondaryAuth, email, password);
-        const newUid = userCredential.user.uid;
-        await secondaryAuth.signOut();
-
-        const ref = doc(db, 'users', newUid);
-        const userData = { username, displayName, role, allowedTeams, isActive, createdAt: serverTimestamp(), createdBy: currentUser.displayName };
-        if (photoUrl) userData.photoUrl = photoUrl;
-        if (phone) userData.phone = phone;
-        await setDoc(ref, userData);
+        await dbInsert('app_users', {
+          id: newUid, email, username,
+          display_name: displayName, name: name || displayName,
+          role, allowed_teams: allowedTeams || [],
+          is_active: isActive !== false,
+          phone: phone || null,
+          created_by: currentUser?.displayName || currentUser?.username || 'admin',
+          data: {
+            ...(photoUrl ? { photoUrl } : {}),
+            ...(department ? { department } : {}),
+            userType: userType || 'youth',
+          },
+        });
         await addActivityLog('사용자_생성', username, null, { role, allowedTeams });
       } catch (err) {
         console.error('사용자 가입 에러:', err);
@@ -348,36 +447,151 @@
       }
     }
 
-    async function updateUser(id, { displayName, role, allowedTeams, isActive, newPassword, photoUrl, phone }, oldData = {}) {
-      const upd = { displayName, role, allowedTeams, isActive, updatedAt: serverTimestamp() };
+    async function updateUser(id, { displayName, name, role, allowedTeams, isActive, newPassword, photoUrl, phone, department, userType }, oldData = {}) {
+      const data = { ...(oldData?.data || {}) };
+      if (photoUrl !== undefined) { if (photoUrl) data.photoUrl = photoUrl; else delete data.photoUrl; }
+      if (department !== undefined) { if (department) data.department = department; else delete data.department; }
+      if (userType !== undefined) data.userType = userType;
+
+      const upd = {
+        display_name: displayName, name: name || displayName,
+        role, allowed_teams: allowedTeams || [],
+        is_active: isActive !== false,
+        data,
+      };
+      if (phone !== undefined) upd.phone = phone || null;
+      await dbUpdate('app_users', { id }, upd);
+
+      // 비밀번호 변경은 Firebase Auth 영역 → Edge Function 필요(미배포 시 안내).
       if (newPassword && newPassword.length >= 6) {
-        upd.pendingPasswordChange = newPassword;
+        try { await callAdminAuthFn('setPassword', { uid: id, password: newPassword }); }
+        catch (e) { throw new Error('프로필은 저장됐지만 비밀번호 변경 실패: ' + e.message); }
       }
-      if (photoUrl !== undefined) upd.photoUrl = photoUrl;
-      if (phone !== undefined) upd.phone = phone;
-      await updateDoc(doc(db, 'users', id), upd);
-      const oldUsername = oldData?.username || '알수없음';
-      await addActivityLog('사용자_수정', oldUsername, oldData || null, { displayName, role, allowedTeams, isActive, passwordChanged: !!(newPassword) });
+      await addActivityLog('사용자_수정', oldData?.username || '알수없음', oldData || null, { displayName, role, allowedTeams, isActive, passwordChanged: !!newPassword });
     }
 
+    // 기본 삭제 = 소프트삭제(비활성화). Firebase Auth 계정은 보존 → 데이터 무결성 유지.
     async function deleteUser(id, username) {
-      await deleteDoc(doc(db, 'users', id));
-      await addActivityLog('사용자_삭제', username, null, null);
+      await dbUpdate('app_users', { id }, { is_active: false });
+      await addActivityLog('사용자_비활성화', username, null, null);
     }
 
-    // ========== TEAM CRUD ==========
+    // 재활성화(소프트삭제 복구)
+    async function reactivateUser(id, username) {
+      await dbUpdate('app_users', { id }, { is_active: true });
+      await addActivityLog('사용자_재활성화', username, null, null);
+    }
+
+    // Firestore users 컬렉션 전체를 Supabase로 일괄 이관 (Bug 5)
+    window.bulkMigrateFirestore = async function () {
+      const ok = await showConfirm(
+        'Firestore의 users 컬렉션을 Supabase app_users로 일괄 이관합니다.\n이미 이관된 사용자는 건너뜁니다.\n진행할까요?',
+        { title: 'Firestore 사용자 전체 이관', okText: '이관 시작' }
+      );
+      if (!ok) return;
+
+      let migrated = 0, skipped = 0, failed = 0;
+      try {
+        const snap = await getDocs(collection(db, 'users'));
+        const total = snap.docs.length;
+        if (total === 0) { showToast('Firestore에 이관할 사용자가 없습니다.', 'info'); return; }
+        showToast(`${total}명 처리 중...`, 'info');
+
+        for (const docSnap of snap.docs) {
+          const uid = docSnap.id;
+          const legacy = docSnap.data();
+          try {
+            const already = await dbGet('app_users', { id: uid });
+            if (already) { skipped++; continue; }
+
+            const uname = legacy.username || uid.slice(0, 8);
+            let rec = {};
+            try { rec = (await getDoc(doc(db, 'user_recovery', uname))).data() || {}; } catch {}
+
+            await dbInsert('app_users', {
+              id: uid,
+              email: `${uname}@youthnaroo.local`,
+              username: uname,
+              display_name: legacy.displayName || uname,
+              name: legacy.displayName || uname,
+              role: legacy.role || 'user',
+              allowed_teams: legacy.allowedTeams || [],
+              is_active: legacy.isActive !== false,
+              phone: legacy.phone || null,
+              created_by: 'bulk-migration',
+              data: {
+                ...(legacy.photoUrl ? { photoUrl: legacy.photoUrl } : {}),
+                ...(rec.securityQuestion ? { securityQuestion: rec.securityQuestion } : {}),
+                ...(rec.securityAnswerHash ? { securityAnswerHash: rec.securityAnswerHash } : {}),
+                ...(rec.encryptedPassword ? { encryptedPassword: rec.encryptedPassword } : {}),
+                migratedFromFirestore: true,
+              },
+            });
+            migrated++;
+          } catch (e) {
+            console.warn('[bulk-migrate] 실패:', uid, e?.message);
+            failed++;
+          }
+        }
+        showToast(`이관 완료: 신규 ${migrated}명 | 이미 존재 ${skipped}명 | 실패 ${failed}명`, 'success');
+        if (migrated > 0) renderUsers();
+      } catch (e) {
+        showToast('이관 실패: ' + e.message, 'error');
+      }
+    };
+
+    // 완전삭제 = Edge Function으로 Firebase Auth 계정까지 제거 후 app_users 행 삭제.
+    // 이후 같은 아이디로 완전히 새 가입 가능(버그 1 해결).
+    async function hardDeleteUser(id, username) {
+      await callAdminAuthFn('deleteUser', { uid: id });
+      await dbDelete('app_users', { id });
+      await addActivityLog('사용자_완전삭제', username, null, null);
+    }
+
+    // ========== TEAM CRUD (Supabase teams) ==========
+    function teamToRow(data) {
+      return {
+        id: data.id,
+        name: data.name,
+        short_name: data.shortName || '',
+        full_type: data.fullType || '',
+        team_schedule: data.schedule || '',
+        typical_rooms: data.typicalRooms || [],
+        bg: data.bg || '', text_class: data.text || '', border_class: data.border || '',
+        leader_ids: data.leaderIds || [],
+        slack_webhook_url: data.slackWebhookUrl || '',
+        dept_config: data.deptConfig || { enabled: false, list: [] },
+      };
+    }
+    // teams 테이블에 leader_ids/slack_webhook_url 컬럼이 없을 수 있음(마이그레이션 전).
+    // 누락 컬럼 오류(PGRST204) 시 해당 키를 빼고 재시도 → 마이그레이션 없이도 활동단 저장 가능.
+    const OPTIONAL_TEAM_COLS = ['leader_ids', 'slack_webhook_url'];
+    function stripMissingCol(row, msg) {
+      const m = String(msg || '');
+      const col = OPTIONAL_TEAM_COLS.find(c => m.includes(`'${c}'`));
+      if (!col) return null;
+      const { [col]: _drop, ...rest } = row;
+      return rest;
+    }
+    async function dbInsertResilient(table, row) {
+      try { return await dbInsert(table, row); }
+      catch (e) { const r = stripMissingCol(row, e.message); if (r) return dbInsertResilient(table, r); throw e; }
+    }
+    async function dbUpdateResilient(table, match, row) {
+      try { return await dbUpdate(table, match, row); }
+      catch (e) { const r = stripMissingCol(row, e.message); if (r) return dbUpdateResilient(table, match, r); throw e; }
+    }
     async function createTeam(data) {
-      await setDoc(doc(db, 'teams', data.id), { ...data, isActive: true, createdAt: serverTimestamp() });
+      await dbInsertResilient('teams', teamToRow(data));
       await addActivityLog('활동단_추가', data.name, null, data);
     }
-
     async function updateTeam(id, data, old) {
-      await updateDoc(doc(db, 'teams', id), { ...data, updatedAt: serverTimestamp() });
+      const row = teamToRow(data); delete row.id;
+      await dbUpdateResilient('teams', { id }, row);
       await addActivityLog('활동단_수정', data.name, old, data);
     }
-
     async function deleteTeam(id, name) {
-      await deleteDoc(doc(db, 'teams', id));
+      await dbDelete('teams', { id });
       await addActivityLog('활동단_삭제', name, null, null);
     }
 
@@ -415,13 +629,14 @@
 
     // ========== DASHBOARD STATS ==========
     async function getDashboardStats() {
-      const [uSnap, tSnap] = await Promise.all([getDocs(collection(db, 'users')), getDocs(collection(db, 'teams'))]);
+      // 사용자/활동단은 Supabase 기준(activity_logs는 아직 Firestore 유지)
+      const users = await loadUsers();
       const q = query(collection(db, 'activity_logs'), orderBy('timestamp', 'desc'), limit(5));
       const lSnap = await getDocs(q);
       return {
-        totalUsers: uSnap.size,
-        activeUsers: uSnap.docs.filter(d => d.data().isActive).length,
-        totalTeams: tSnap.size,
+        totalUsers: users.length,
+        activeUsers: users.filter(u => u.isActive).length,
+        totalTeams: TEAMS.length,
         recentLogs: lSnap.docs.map(d => ({ id: d.id, ...d.data() }))
       };
     }
@@ -466,31 +681,23 @@
       if (!panel) return;
       panel.innerHTML = `<div class="text-center py-16 text-slate-400"><div class="w-8 h-8 border-4 border-slate-200 border-t-teal-500 rounded-full animate-spin mx-auto mb-4"></div>로딩 중...</div>`;
 
-      const snap = await getDocs(query(collection(db, 'invite_codes'), orderBy('createdAt', 'desc'), limit(100)));
-      const codes = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      // 초대코드는 Supabase invite_codes가 단일 출처(등록 흐름 auth.js가 여기서 읽음). snake_case→camelCase 매핑.
+      const icRows = await dbGetMany('invite_codes', {}, { orderBy: 'created_at', asc: false, limit: 100 });
+      const codes = (icRows || []).map(r => ({
+        id: r.code, role: r.role, allowedTeams: r.allowed_teams || [],
+        isUsed: r.is_used, usedBy: r.used_by, targetUsername: r.target_username,
+        createdAt: r.created_at, meta: r.meta || {},
+      }));
 
       panel.innerHTML = `
         <div class="mb-6 flex flex-wrap gap-3 items-center">
           <h2 class="text-lg font-bold text-slate-800 flex-1">초대코드 관리</h2>
           <div class="flex gap-2 flex-wrap">
-            <select id="ic-role" class="px-3 py-2 text-sm border border-slate-200 rounded-xl bg-white">
-              <option value="user">일반 사용자</option>
-              <option value="admin">관리자</option>
-            </select>
-            <select id="ic-team" class="px-3 py-2 text-sm border border-slate-200 rounded-xl bg-white">
-              <option value="">활동단 선택 (선택)</option>
-              ${TEAMS.map(t => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('')}
-            </select>
-            <input id="ic-target-user" type="text" placeholder="지정 사용자 (선택)" class="px-3 py-2 text-sm border border-slate-200 rounded-xl bg-white w-36" title="특정 아이디만 사용 가능하도록 지정">
-            <div class="flex items-center gap-1.5 border border-slate-200 rounded-xl bg-white px-3 py-2">
-              <label class="text-xs text-slate-500 whitespace-nowrap">생성 개수</label>
-              <input id="ic-count" type="number" min="1" max="50" value="1" class="w-14 text-sm text-center border-0 focus:outline-none bg-transparent font-bold text-slate-700">
-            </div>
             <button onclick="exportInviteCodesExcel()" class="px-4 py-2 bg-slate-600 hover:bg-slate-700 text-white text-sm font-bold rounded-xl transition-colors flex items-center gap-1.5">
               <i data-lucide="download" class="w-4 h-4"></i> 엑셀
             </button>
-            <button id="ic-gen-btn" class="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white text-sm font-bold rounded-xl transition-colors flex items-center gap-1.5">
-              <i data-lucide="plus" class="w-4 h-4"></i> 코드 생성
+            <button onclick="openInviteCodeModal()" class="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white text-sm font-bold rounded-xl transition-colors flex items-center gap-1.5">
+              <i data-lucide="plus" class="w-4 h-4"></i> 초대코드 발급
             </button>
           </div>
         </div>
@@ -501,6 +708,7 @@
                 <th class="text-left px-4 py-3 text-xs font-bold text-slate-500">코드</th>
                 <th class="text-left px-4 py-3 text-xs font-bold text-slate-500">권한</th>
                 <th class="text-left px-4 py-3 text-xs font-bold text-slate-500">활동단</th>
+                <th class="text-left px-4 py-3 text-xs font-bold text-slate-500">대상</th>
                 <th class="text-left px-4 py-3 text-xs font-bold text-slate-500">상태</th>
                 <th class="text-left px-4 py-3 text-xs font-bold text-slate-500">사용자</th>
                 <th class="text-left px-4 py-3 text-xs font-bold text-slate-500">지정 사용자</th>
@@ -520,12 +728,15 @@
                     ? (c.allowedTeams).map(tid => { const t = getTeam(tid); return t ? `<span class="inline-block px-1.5 py-0.5 text-[9px] font-bold rounded mr-1 ${t.bg} ${t.text}">${esc(t.name)}</span>` : esc(tid); }).join('')
                     : '<span class="text-slate-400">-</span>'}
                 </td>
+                <td class="px-4 py-3 text-xs">
+                  ${c.meta?.name ? `<span class="font-medium text-slate-700">${esc(c.meta.name)}</span>${c.meta.userType === 'staff' ? ' <span class="text-[9px] text-slate-400">직원</span>' : ''}` : '<span class="text-slate-400">-</span>'}
+                </td>
                 <td class="px-4 py-3">
                   <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${c.isUsed ? 'bg-slate-100 text-slate-500' : 'bg-green-100 text-green-700'}">${c.isUsed ? '사용됨' : '사용 가능'}</span>
                 </td>
                 <td class="px-4 py-3 text-slate-600 text-xs">${c.usedBy ? esc(c.usedBy) : '-'}</td>
                 <td class="px-4 py-3 text-slate-600 text-xs">${c.targetUsername ? `<span class="px-1.5 py-0.5 bg-indigo-50 text-indigo-700 rounded font-mono text-[10px]">${esc(c.targetUsername)}</span>` : '-'}</td>
-                <td class="px-4 py-3 text-slate-400 text-xs">${c.createdAt?.toDate ? c.createdAt.toDate().toLocaleDateString('ko-KR') : '-'}</td>
+                <td class="px-4 py-3 text-slate-400 text-xs">${c.createdAt ? new Date(c.createdAt).toLocaleDateString('ko-KR') : '-'}</td>
                 <td class="px-4 py-3 text-right">
                   ${!c.isUsed ? `<button onclick="revokeInviteCode('${esc(c.id)}')" class="text-xs text-red-500 hover:text-red-700 border border-red-200 hover:border-red-400 px-2.5 py-1 rounded-lg transition-colors">취소</button>` : ''}
                 </td>
@@ -534,68 +745,72 @@
           </table>
         </div>`;
 
-      document.getElementById('ic-gen-btn')?.addEventListener('click', async () => {
-        const btn = document.getElementById('ic-gen-btn');
-        const role = document.getElementById('ic-role')?.value || 'user';
-        const teamId = document.getElementById('ic-team')?.value || '';
-        const targetUsername = document.getElementById('ic-target-user')?.value.trim() || null;
-        const count = Math.min(50, Math.max(1, parseInt(document.getElementById('ic-count')?.value) || 1));
-        const teamName = teamId ? (getTeam(teamId)?.name || teamId) : '활동단 미지정';
+      lucide.createIcons();
+    }
 
-        btn.disabled = true;
-        btn.textContent = `생성 중...`;
-        try {
-          const codes = Array.from({ length: count }, () => genCode());
-          await Promise.all(codes.map(code => setDoc(doc(db, 'invite_codes', code), {
-            role, allowedTeams: teamId ? [teamId] : [], isUsed: false,
-            targetUsername: count === 1 ? targetUsername : null,
-            createdBy: currentUser?.username || 'admin',
-            createdAt: serverTimestamp(), usedBy: null, usedAt: null
-          })));
-          showToast(
-            count === 1
-              ? `초대코드 생성: ${codes[0]} (${teamName})`
-              : `${count}개 초대코드 생성 완료 (${teamName})`,
-            'success'
-          );
-        } finally {
-          btn.disabled = false;
-          btn.innerHTML = `<i data-lucide="plus" class="w-4 h-4"></i> 코드 생성`;
-          lucide.createIcons();
-        }
-        await renderInviteCodes();
-      });
+    // ── 초대코드 발급 모달 (청소년/직원 · 이름 · 활동단 태그 · 부서 토글) ──
+    let icTeamTags = []; // 선택된 활동단 id 목록(태그식)
+    function icRenderTeamTags() {
+      const wrap = document.getElementById('ic-team-tags');
+      if (!wrap) return;
+      wrap.innerHTML = icTeamTags.map(tid => {
+        const t = getTeam(tid);
+        return `<span class="inline-flex items-center gap-1 text-xs ${t ? `${t.bg} ${t.text}` : 'bg-slate-100 text-slate-600'} px-2 py-1 rounded-lg font-bold">
+          ${esc(t ? t.name : tid)}
+          <button type="button" onclick="icRemoveTeam('${esc(tid)}')" class="opacity-60 hover:opacity-100 font-bold leading-none ml-0.5">&times;</button>
+        </span>`;
+      }).join('') || '<span class="text-[11px] text-slate-400">활동단을 선택하세요 (선택)</span>';
+    }
+    window.icRemoveTeam = function (tid) { icTeamTags = icTeamTags.filter(x => x !== tid); icRenderTeamTags(); };
+    function icUpdateMode() {
+      const ut = document.getElementById('ic-usertype')?.value || 'youth';
+      const teamRow = document.getElementById('ic-team-row');
+      const deptToggleRow = document.getElementById('ic-dept-toggle-row');
+      const staffDeptRow = document.getElementById('ic-staff-dept-row');
+      if (ut === 'staff') {
+        teamRow?.classList.add('hidden');
+        deptToggleRow?.classList.add('hidden');
+        staffDeptRow?.classList.remove('hidden');
+      } else {
+        teamRow?.classList.remove('hidden');
+        deptToggleRow?.classList.remove('hidden');
+        staffDeptRow?.classList.add('hidden');
+      }
+    }
+    window.openInviteCodeModal = function () {
+      icTeamTags = [];
+      const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+      set('ic-usertype', 'youth'); set('ic-role', 'user'); set('ic-name', '');
+      set('ic-target-user', ''); set('ic-count', '1'); set('ic-staff-dept', '');
+      const de = document.getElementById('ic-dept-enabled'); if (de) de.checked = false;
+      // 활동단 선택 드롭다운 채우기
+      const sel = document.getElementById('ic-team-pick');
+      if (sel) sel.innerHTML = '<option value="">+ 활동단 추가</option>' + TEAMS.map(t => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('');
+      icRenderTeamTags();
+      icUpdateMode();
+      showModal('invite-modal');
       lucide.createIcons();
     }
 
     window.revokeInviteCode = async function(code) {
       if (!await showConfirm(`초대코드 ${code}를 삭제하시겠습니까?`, { title: '초대코드 삭제', okText: '삭제', danger: true })) return;
-      await addDoc(collection(db, 'invite_code_logs'), {
-        code, action: 'revoked',
-        revokedBy: currentUser?.username || 'admin',
-        revokedByName: currentUser?.displayName || '',
-        revokedAt: serverTimestamp()
-      });
-      await deleteDoc(doc(db, 'invite_codes', code));
+      await dbDelete('invite_codes', { code });
       showToast('초대코드가 삭제되었습니다.', 'success');
       renderInviteCodes();
     };
 
     window.exportInviteCodesExcel = async function() {
-      const snap = await getDocs(query(collection(db, 'invite_codes'), orderBy('createdAt', 'desc'), limit(500)));
-      const rows = snap.docs.map(d => {
-        const c = { id: d.id, ...d.data() };
-        return {
-          코드: c.id,
-          권한: c.role === 'admin' ? '관리자' : '일반',
-          활동단: (c.allowedTeams || []).map(tid => getTeam(tid)?.name || tid).join(', ') || '-',
-          상태: c.isUsed ? '사용됨' : '사용 가능',
-          사용자: c.usedBy || '',
-          지정사용자: c.targetUsername || '',
-          생성일: c.createdAt?.toDate ? c.createdAt.toDate().toLocaleDateString('ko-KR') : '',
-          사용일: c.usedAt?.toDate ? c.usedAt.toDate().toLocaleDateString('ko-KR') : '',
-        };
-      });
+      const icRows = await dbGetMany('invite_codes', {}, { orderBy: 'created_at', asc: false, limit: 500 });
+      const rows = (icRows || []).map(r => ({
+        코드: r.code,
+        권한: r.role === 'admin' ? '관리자' : '일반',
+        활동단: (r.allowed_teams || []).map(tid => getTeam(tid)?.name || tid).join(', ') || '-',
+        상태: r.is_used ? '사용됨' : '사용 가능',
+        사용자: r.used_by || '',
+        지정사용자: r.target_username || '',
+        생성일: r.created_at ? new Date(r.created_at).toLocaleDateString('ko-KR') : '',
+        사용일: r.used_at ? new Date(r.used_at).toLocaleDateString('ko-KR') : '',
+      }));
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), '초대코드');
       XLSX.writeFile(wb, '초대코드목록.xlsx');
@@ -728,9 +943,14 @@
         <h2 class="text-base font-bold text-slate-800">사용자 관리</h2>
         <p class="text-xs text-slate-400 mt-0.5">전체 ${users.length}명</p>
       </div>
-      <button onclick="openUserModal()" class="flex items-center gap-2 bg-teal-600 hover:bg-teal-700 text-white px-4 py-2 rounded-xl text-sm font-bold shadow-sm transition-all">
-        <i data-lucide="user-plus" class="w-4 h-4"></i> 새 사용자 추가
-      </button>
+      <div class="flex gap-2 flex-wrap">
+        <button onclick="bulkMigrateFirestore()" class="flex items-center gap-2 bg-slate-600 hover:bg-slate-700 text-white px-4 py-2 rounded-xl text-sm font-bold shadow-sm transition-all" title="Firebase Firestore의 기존 사용자를 Supabase로 일괄 이관">
+          <i data-lucide="database" class="w-4 h-4"></i> Firestore 이관
+        </button>
+        <button onclick="openUserModal()" class="flex items-center gap-2 bg-teal-600 hover:bg-teal-700 text-white px-4 py-2 rounded-xl text-sm font-bold shadow-sm transition-all">
+          <i data-lucide="user-plus" class="w-4 h-4"></i> 새 사용자 추가
+        </button>
+      </div>
     </div>
     <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
       <div class="overflow-x-auto">
@@ -762,7 +982,12 @@
                 <td class="px-4 py-3 text-right">
                   <div class="flex items-center justify-end gap-1">
                     <button onclick="handleEditUser(this)" data-uid="${esc(u.id)}" class="p-1.5 rounded-lg hover:bg-blue-100 text-blue-600 transition-colors" title="수정"><i data-lucide="pencil" class="w-3.5 h-3.5"></i></button>
-                    ${u.role === 'superadmin' && !isSuperAdmin() ? `<button class="p-1.5 rounded-lg text-slate-300 cursor-not-allowed" title="주관리자 삭제 불가"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button>` : `<button onclick="handleDeleteUser(this)" data-uid="${esc(u.id)}" data-username="${esc(u.username)}" class="p-1.5 rounded-lg hover:bg-red-100 text-red-500 transition-colors" title="삭제"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button>`}
+                    ${(u.role === 'superadmin' && !isSuperAdmin())
+            ? `<button class="p-1.5 rounded-lg text-slate-300 cursor-not-allowed" title="주관리자 삭제 불가"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button>`
+            : `${u.isActive
+              ? `<button onclick="handleDeleteUser(this)" data-uid="${esc(u.id)}" data-username="${esc(u.username)}" class="p-1.5 rounded-lg hover:bg-amber-100 text-amber-600 transition-colors" title="비활성화(소프트 삭제)"><i data-lucide="user-x" class="w-3.5 h-3.5"></i></button>`
+              : `<button onclick="handleReactivateUser(this)" data-uid="${esc(u.id)}" data-username="${esc(u.username)}" class="p-1.5 rounded-lg hover:bg-emerald-100 text-emerald-600 transition-colors" title="재활성화"><i data-lucide="user-check" class="w-3.5 h-3.5"></i></button>`}
+               <button onclick="handleHardDeleteUser(this)" data-uid="${esc(u.id)}" data-username="${esc(u.username)}" class="p-1.5 rounded-lg hover:bg-red-100 text-red-500 transition-colors" title="완전 삭제(계정까지 제거)"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button>`}
                   </div>
                 </td>
               </tr>
@@ -1270,6 +1495,58 @@
     }
 
     // ========== USER MODAL ==========
+    // ── 유저 모달: 구분/활동단에 따른 부서 UI + 표시명 라이브 계산 ──
+    function umFirstTeamName() {
+      const checked = document.querySelector('[name=allowedTeams]:checked');
+      if (!checked) return null;
+      const t = getTeam(checked.value);
+      return t ? t.name : null;
+    }
+    function umDepartment() {
+      const ut = document.getElementById('user-usertype')?.value || 'youth';
+      if (ut === 'staff') return document.getElementById('user-dept-input')?.value.trim() || '';
+      const sel = document.getElementById('user-dept-select');
+      return (sel && !sel.classList.contains('hidden')) ? sel.value : '';
+    }
+    function umRefreshDispname() {
+      const ut = document.getElementById('user-usertype')?.value || 'youth';
+      const name = document.getElementById('user-displayname')?.value.trim() || '';
+      const teamName = ut === 'staff' ? null : umFirstTeamName();
+      const out = document.getElementById('user-dispname-preview');
+      if (out) out.value = computeDisplayName({ userType: ut, teamName, department: umDepartment(), name });
+    }
+    function umRefreshDeptUI(preset) {
+      const ut = document.getElementById('user-usertype')?.value || 'youth';
+      const sel = document.getElementById('user-dept-select');
+      const inp = document.getElementById('user-dept-input');
+      const hint = document.getElementById('user-dept-hint');
+      if (ut === 'staff') {
+        sel?.classList.add('hidden');
+        inp?.classList.remove('hidden');
+        if (preset !== undefined && inp) inp.value = preset || '';
+        if (hint) hint.textContent = '직원은 활동단 대신 부서를 직접 입력합니다.';
+      } else {
+        inp?.classList.add('hidden');
+        const checked = document.querySelector('[name=allowedTeams]:checked');
+        const team = checked ? getTeam(checked.value) : null;
+        const dc = team?.deptConfig || { enabled: false, list: [] };
+        if (sel && dc.enabled && (dc.list || []).length) {
+          sel.innerHTML = '';
+          sel.appendChild(new Option('(부서 없음)', ''));
+          dc.list.forEach(d => sel.appendChild(new Option(d, d)));
+          if (preset !== undefined && dc.list.includes(preset)) sel.value = preset;
+          sel.classList.remove('hidden');
+          if (hint) hint.textContent = `${team.name} 부서 중 선택`;
+        } else if (sel) {
+          sel.classList.add('hidden');
+          if (hint) hint.textContent = team ? '이 활동단은 하위 부서가 없습니다.' : '활동단을 선택하면 부서를 고를 수 있어요.';
+        }
+      }
+      umRefreshDispname();
+    }
+    window._umRefreshDeptUI = umRefreshDeptUI;
+    window._umRefreshDispname = umRefreshDispname;
+
     window.openUserModal = async function (uid = null) {
       let user = null;
       if (uid) {
@@ -1287,7 +1564,7 @@
       document.getElementById('user-id-field').value = uid || '';
       document.getElementById('user-username').value = user?.username || '';
       document.getElementById('user-username').disabled = isEdit;
-      document.getElementById('user-displayname').value = user?.displayName || '';
+      document.getElementById('user-displayname').value = user?.name || user?.displayName || '';
       document.getElementById('user-password').value = '';
       
       const passEl = document.getElementById('user-password');
@@ -1306,6 +1583,10 @@
       document.getElementById('user-phone').value = user?.phone || '';
       document.getElementById('user-teams-cb').innerHTML = teamCbs;
       document.getElementById('user-role').dispatchEvent(new Event('change'));
+      // 구분(청소년/직원) + 부서 초기화 → 표시명 미리보기 갱신
+      const utEl = document.getElementById('user-usertype');
+      if (utEl) utEl.value = user?.userType || 'youth';
+      umRefreshDeptUI(user?.department ?? '');
       const photoFileEl = document.getElementById('user-photo-file');
       if (photoFileEl) photoFileEl.value = '';
       const previewEl = document.getElementById('user-photo-preview');
@@ -1319,9 +1600,25 @@
       showModal('user-modal');
     };
 
+    // 기본 삭제 = 비활성화(소프트삭제). 계정/데이터 보존, 재활성화 가능.
     window.confirmDeleteUser = async function (uid, username) {
-      if (!await showConfirm(`사용자 [${username}]를 삭제합니다.\n삭제 후 복구할 수 없습니다.`, { title: '사용자 삭제', okText: '삭제', danger: true })) return;
-      deleteUser(uid, username).then(() => { showToast('사용자가 삭제되었습니다.', 'success'); renderUsers(); }).catch(e => showToast(e.message, 'error'));
+      if (!await showConfirm(`사용자 [${username}]를 비활성화합니다.\n로그인이 차단되며, 언제든 재활성화할 수 있습니다.`, { title: '사용자 비활성화', okText: '비활성화', danger: true })) return;
+      deleteUser(uid, username).then(() => { showToast('사용자가 비활성화되었습니다.', 'success'); renderUsers(); }).catch(e => showToast(e.message, 'error'));
+    };
+    window.handleReactivateUser = function (btn) {
+      const uid = btn.getAttribute('data-uid');
+      const username = btn.getAttribute('data-username');
+      reactivateUser(uid, username).then(() => { showToast('사용자가 재활성화되었습니다.', 'success'); renderUsers(); }).catch(e => showToast(e.message, 'error'));
+    };
+    // 완전삭제 = Firebase Auth 계정까지 제거(Edge Function). 같은 아이디로 새 가입 가능해짐.
+    window.handleHardDeleteUser = function (btn) {
+      const uid = btn.getAttribute('data-uid');
+      const username = btn.getAttribute('data-username');
+      window.confirmHardDeleteUser(uid, username);
+    };
+    window.confirmHardDeleteUser = async function (uid, username) {
+      if (!await showConfirm(`사용자 [${username}]를 완전 삭제합니다.\n\n• 로그인 계정과 모든 식별정보가 영구 삭제됩니다.\n• 복구할 수 없습니다.\n• 같은 아이디로 다시 가입할 수 있게 됩니다.\n\n(이 작업은 admin-auth Edge Function 배포가 필요합니다.)`, { title: '⚠ 완전 삭제', okText: '완전 삭제', danger: true })) return;
+      hardDeleteUser(uid, username).then(() => { showToast('사용자가 완전 삭제되었습니다.', 'success'); renderUsers(); }).catch(e => showToast(e.message, 'error'));
     };
 
     window.handleEditUser = function (btn) {
@@ -1353,6 +1650,25 @@
     };
 
     // ========== TEAM MODAL ==========
+    // ── 활동단 하위 부서 편집 상태 ──
+    let teamDeptList = [];
+    function renderTeamDepts() {
+      const wrap = document.getElementById('team-dept-list');
+      if (!wrap) return;
+      wrap.innerHTML = teamDeptList.map((d, i) => `
+        <span class="inline-flex items-center gap-1 text-xs bg-white border border-indigo-200 text-indigo-700 px-2 py-1 rounded-lg font-medium">
+          ${esc(d)}
+          <button type="button" onclick="removeTeamDept(${i})" class="text-indigo-400 hover:text-indigo-700 font-bold leading-none ml-0.5">&times;</button>
+        </span>`).join('') || '<span class="text-[11px] text-slate-400">아직 부서가 없습니다.</span>';
+    }
+    window.removeTeamDept = function (i) { teamDeptList.splice(i, 1); renderTeamDepts(); };
+    function addTeamDept() {
+      const el = document.getElementById('team-dept-input');
+      const v = (el.value || '').trim();
+      if (v && !teamDeptList.includes(v)) { teamDeptList.push(v); renderTeamDepts(); }
+      el.value = ''; el.focus();
+    }
+
     window.openTeamModal = async function (tid = null) {
       const team = tid ? TEAMS.find(t => t.id === tid) : null;
       const isEdit = !!team;
@@ -1372,6 +1688,13 @@
         if (ck) document.getElementById('team-color').value = ck.key;
       }
       document.getElementById('team-slack-url').value = team?.slackWebhookUrl || '';
+      // 부서 설정 초기화
+      const dc = team?.deptConfig || { enabled: false, list: [] };
+      teamDeptList = Array.isArray(dc.list) ? [...dc.list] : [];
+      const deptEnabledEl = document.getElementById('team-dept-enabled');
+      if (deptEnabledEl) deptEnabledEl.checked = !!dc.enabled;
+      document.getElementById('team-dept-wrap')?.classList.toggle('hidden', !dc.enabled);
+      renderTeamDepts();
       try {
         const users = await loadUsers();
         teamLeaderUsers = users.filter(u => u.isActive !== false);
@@ -1539,42 +1862,34 @@
       onAuthStateChanged(auth, async (user) => {
         if (user) {
           try {
-            const userDocRef = doc(db, 'users', user.uid);
-            let userDocSnap = await getDoc(userDocRef);
-
-            // 최초 주관리자 계정(admin@youthnaroo.local) 초기화 폴백
-            if (!userDocSnap.exists() && user.email === 'admin@youthnaroo.local') {
-              const initialAdmin = {
-                username: 'admin',
-                displayName: '시스템관리자',
-                role: 'superadmin',
-                allowedTeams: [],
-                isActive: true,
-                createdAt: serverTimestamp(),
-                createdBy: 'system'
-              };
-              await setDoc(userDocRef, initialAdmin);
-              userDocSnap = await getDoc(userDocRef);
+            // 세션 복원: 사용자 데이터는 Supabase app_users(레거시는 자동 이관)
+            let row = await dbGet('app_users', { id: user.uid });
+            if (!row && user.email === 'admin@youthnaroo.local') {
+              await dbInsert('app_users', {
+                id: user.uid, email: user.email, username: 'admin',
+                display_name: '시스템관리자', name: '시스템관리자',
+                role: 'superadmin', allowed_teams: [], is_active: true,
+                created_by: 'system', data: {},
+              });
+              row = await dbGet('app_users', { id: user.uid });
             }
+            if (!row) row = await adminMigrateLegacyUser(user.uid, user.email || '');
 
-            if (userDocSnap.exists() && userDocSnap.data().isActive) {
-              const userData = userDocSnap.data();
-              if (userData.role !== 'admin' && userData.role !== 'superadmin') {
+            if (row && row.is_active !== false) {
+              if (row.role !== 'admin' && row.role !== 'superadmin') {
                 // signOut을 호출하지 않음: 같은 브라우저 다른 탭(index.html)의 일반 유저 세션에 영향을 주지 않기 위해
                 currentUser = null;
                 updateHeader();
                 showModal('login-modal');
                 return;
               }
-
               currentUser = {
                 id: user.uid,
-                username: userData.username,
-                displayName: userData.displayName,
-                role: userData.role,
-                allowedTeams: userData.allowedTeams || []
+                username: row.username,
+                displayName: row.display_name || row.name || row.username,
+                role: row.role,
+                allowedTeams: row.allowed_teams || []
               };
-
               hideModal('login-modal');
               await loadTeams();
               updateHeader();
@@ -1598,6 +1913,16 @@
       });
 
       // User modal form
+      // 표시명 라이브 계산 트리거
+      document.getElementById('user-usertype')?.addEventListener('change', () => umRefreshDeptUI(''));
+      document.getElementById('user-displayname')?.addEventListener('input', () => umRefreshDispname());
+      document.getElementById('user-dept-select')?.addEventListener('change', () => umRefreshDispname());
+      document.getElementById('user-dept-input')?.addEventListener('input', () => umRefreshDispname());
+      document.getElementById('user-teams-cb')?.addEventListener('change', e => { if (e.target.name === 'allowedTeams') umRefreshDeptUI(umDepartment()); });
+
+      // 연락처 입력칸을 떠날 때 자동 하이픈
+      document.getElementById('user-phone')?.addEventListener('blur', e => { e.target.value = formatPhone(e.target.value); });
+
       document.getElementById('user-form')?.addEventListener('submit', async e => {
         e.preventDefault();
         const btn = e.target.querySelector('[type=submit]');
@@ -1606,13 +1931,17 @@
           const uid = document.getElementById('user-id-field').value;
           const isEdit = !!uid;
           const username = document.getElementById('user-username').value.trim();
-          const displayName = document.getElementById('user-displayname').value.trim();
+          const realName = document.getElementById('user-displayname').value.trim();
           const password = document.getElementById('user-password').value;
           const role = document.getElementById('user-role').value;
           const isActive = document.getElementById('user-is-active').checked;
           const allowedTeams = Array.from(document.querySelectorAll('[name=allowedTeams]:checked')).map(c => c.value);
-          const phone = (document.getElementById('user-phone')?.value || '').trim();
-          if (!displayName || (!isEdit && !password)) throw new Error('필수 항목을 모두 입력해주세요.');
+          const phone = formatPhone((document.getElementById('user-phone')?.value || '').trim());
+          const userType = document.getElementById('user-usertype')?.value || 'youth';
+          const department = umDepartment();
+          const teamName = userType === 'staff' ? null : umFirstTeamName();
+          const displayName = computeDisplayName({ userType, teamName, department, name: realName });
+          if (!realName || (!isEdit && !password)) throw new Error('필수 항목을 모두 입력해주세요.');
           if (isEdit && password && password.length < 6) throw new Error('비밀번호는 6자 이상이어야 합니다.');
           let photoUrl = undefined;
           const photoFile = document.getElementById('user-photo-file')?.files?.[0];
@@ -1623,10 +1952,10 @@
           }
           if (isEdit) {
             const users = await loadUsers(); const old = users.find(u => u.id === uid);
-            await updateUser(uid, { displayName, newPassword: password, role, allowedTeams, isActive, photoUrl, phone }, old);
-            showToast(`사용자가 수정되었습니다.${password ? ' (비밀번호 변경은 다음 로그인 시 적용)' : ''}`, 'success');
+            await updateUser(uid, { displayName, name: realName, newPassword: password, role, allowedTeams, isActive, photoUrl, phone, department, userType }, old);
+            showToast(`사용자가 수정되었습니다.${password ? ' (비밀번호 변경 적용됨)' : ''}`, 'success');
           } else {
-            await createUser({ username, displayName, password, role, allowedTeams, isActive, photoUrl, phone });
+            await createUser({ username, displayName, name: realName, password, role, allowedTeams, isActive, photoUrl, phone, department, userType });
             showToast('사용자가 추가되었습니다.', 'success');
           }
           hideModal('user-modal'); await renderUsers();
@@ -1686,6 +2015,15 @@
         }
       });
 
+      // 부서 사용 토글 / 부서 추가
+      document.getElementById('team-dept-enabled')?.addEventListener('change', e => {
+        document.getElementById('team-dept-wrap')?.classList.toggle('hidden', !e.target.checked);
+      });
+      document.getElementById('team-dept-add')?.addEventListener('click', addTeamDept);
+      document.getElementById('team-dept-input')?.addEventListener('keydown', e => {
+        if (e.key === 'Enter') { e.preventDefault(); addTeamDept(); }
+      });
+
       // Team modal form
       document.getElementById('team-form')?.addEventListener('submit', async e => {
         e.preventDefault();
@@ -1705,7 +2043,8 @@
           const leaderIds = [...teamLeaderIds];
           const slackWebhookUrl = document.getElementById('team-slack-url')?.value.trim() || '';
           if (!id || !name) throw new Error('ID와 이름은 필수입니다.');
-          const data = { id, name, shortName, fullType, schedule, typicalRooms, bg: col.bg, text: col.text, border: col.border, leaderIds, slackWebhookUrl };
+          const deptConfig = { enabled: !!document.getElementById('team-dept-enabled')?.checked, list: [...teamDeptList] };
+          const data = { id, name, shortName, fullType, schedule, typicalRooms, bg: col.bg, text: col.text, border: col.border, leaderIds, slackWebhookUrl, deptConfig };
           if (isEdit) { const old = TEAMS.find(t => t.id === tid); await updateTeam(tid, data, old); showToast('활동단이 수정되었습니다.', 'success'); }
           else { await createTeam(data); showToast('활동단이 추가되었습니다.', 'success'); }
           hideModal('team-modal'); renderTeams();
@@ -1716,6 +2055,46 @@
       // Close modals
       document.getElementById('close-user-modal')?.addEventListener('click', () => hideModal('user-modal'));
       document.getElementById('close-team-modal')?.addEventListener('click', () => hideModal('team-modal'));
+      document.getElementById('close-invite-modal')?.addEventListener('click', () => hideModal('invite-modal'));
+
+      // 초대코드 모달: 구분 변경 / 활동단 태그 추가 / 발급
+      document.getElementById('ic-usertype')?.addEventListener('change', icUpdateMode);
+      document.getElementById('ic-team-pick')?.addEventListener('change', e => {
+        const tid = e.target.value;
+        if (tid && !icTeamTags.includes(tid)) { icTeamTags.push(tid); icRenderTeamTags(); }
+        e.target.value = '';
+      });
+      document.getElementById('invite-form')?.addEventListener('submit', async e => {
+        e.preventDefault();
+        const btn = e.target.querySelector('[type=submit]');
+        btn.disabled = true; btn.textContent = '발급 중...';
+        try {
+          const userType = document.getElementById('ic-usertype').value || 'youth';
+          const role = document.getElementById('ic-role').value || 'user';
+          const name = document.getElementById('ic-name').value.trim();
+          const targetUsername = document.getElementById('ic-target-user').value.trim() || null;
+          const count = Math.min(50, Math.max(1, parseInt(document.getElementById('ic-count').value) || 1));
+          const deptEnabled = !!document.getElementById('ic-dept-enabled').checked;
+          const staffDept = document.getElementById('ic-staff-dept').value.trim();
+          const allowedTeams = userType === 'staff' ? [] : [...icTeamTags];
+          const meta = {
+            name: name || '',
+            userType,
+            department: userType === 'staff' ? staffDept : '',
+            deptEnabled: userType === 'staff' ? true : deptEnabled,
+          };
+          const codes = Array.from({ length: count }, () => genCode());
+          await Promise.all(codes.map(code => dbInsert('invite_codes', {
+            code, role, allowed_teams: allowedTeams, is_used: false,
+            target_username: count === 1 ? targetUsername : null,
+            used_by: null, meta,
+          })));
+          showToast(count === 1 ? `초대코드 발급: ${codes[0]}` : `${count}개 초대코드 발급 완료`, 'success');
+          hideModal('invite-modal');
+          await renderInviteCodes();
+        } catch (err) { showToast(err.message || '발급 실패', 'error'); }
+        finally { btn.disabled = false; btn.textContent = '발급'; }
+      });
       document.getElementById('close-contrib-modal')?.addEventListener('click', () => hideModal('contributor-modal'));
       document.getElementById('contributor-modal')?.addEventListener('click', e => { if (e.target === document.getElementById('contributor-modal')) hideModal('contributor-modal'); });
 
@@ -2022,6 +2401,13 @@
       </div>
       <form id="user-form" class="p-5 flex flex-col gap-4">
         <input type="hidden" id="user-id-field">
+        <!-- 표시명(자동 계산) — 상단 항목 -->
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1.5">표시명 <span class="text-slate-400 font-normal">(자동 생성)</span></label>
+          <input id="user-dispname-preview" type="text" readonly placeholder="이름·구분·부서 입력 시 자동 생성"
+            class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl bg-slate-50 text-slate-700 font-bold">
+          <p class="text-[10px] text-slate-400 mt-1">청소년: [활동단]/[부서]/이름 · 직원: [부서]/이름</p>
+        </div>
         <div class="grid grid-cols-2 gap-3">
           <div>
             <label class="block text-xs font-semibold text-slate-600 mb-1.5">아이디 <span
@@ -2030,10 +2416,28 @@
               class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400 placeholder-slate-300 disabled:bg-slate-50 disabled:text-slate-400">
           </div>
           <div>
-            <label class="block text-xs font-semibold text-slate-600 mb-1.5">이름 <span
+            <label class="block text-xs font-semibold text-slate-600 mb-1.5">이름(실명) <span
                 class="text-red-400">*</span></label>
-            <input id="user-displayname" type="text" required placeholder="표시 이름"
+            <input id="user-displayname" type="text" required placeholder="실명"
               class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400 placeholder-slate-300">
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1.5">구분</label>
+            <select id="user-usertype"
+              class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-teal-400">
+              <option value="youth">🧒 청소년</option>
+              <option value="staff">🧑‍🏫 직원/교사</option>
+            </select>
+          </div>
+          <div id="user-dept-row">
+            <label class="block text-xs font-semibold text-slate-600 mb-1.5">부서 <span class="text-slate-400 font-normal">(선택)</span></label>
+            <select id="user-dept-select"
+              class="hidden w-full px-3 py-2 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-teal-400"></select>
+            <input id="user-dept-input" type="text" placeholder="부서명 직접 입력"
+              class="hidden w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400 placeholder-slate-300">
+            <p id="user-dept-hint" class="text-[10px] text-slate-400 mt-1"></p>
           </div>
         </div>
         <div>
@@ -2167,8 +2571,82 @@
               class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-400 placeholder-slate-300">
           </div>
         </div>
+        <!-- 하위 부서 설정 (선택) -->
+        <div class="border border-slate-200 rounded-xl p-3 bg-slate-50/60">
+          <label class="flex items-center justify-between cursor-pointer">
+            <span class="text-xs font-semibold text-slate-700">하위 부서 사용 <span class="text-slate-400 font-normal">(부서가 있는 활동단만)</span></span>
+            <input type="checkbox" id="team-dept-enabled" class="accent-indigo-600 w-4 h-4">
+          </label>
+          <div id="team-dept-wrap" class="hidden mt-2">
+            <div id="team-dept-list" class="flex flex-wrap gap-1.5 mb-2"></div>
+            <div class="flex gap-1.5">
+              <input id="team-dept-input" type="text" placeholder="부서명 입력 후 Enter 또는 추가"
+                class="flex-1 px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-400 placeholder-slate-300">
+              <button type="button" id="team-dept-add" class="px-3 py-2 bg-indigo-100 text-indigo-700 text-xs font-bold rounded-xl hover:bg-indigo-200">추가</button>
+            </div>
+          </div>
+        </div>
         <button type="submit"
           class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 rounded-xl transition-all text-sm shadow-sm mt-1">저장</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- ===== INVITE CODE MODAL ===== -->
+  <div id="invite-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md border border-slate-200 overflow-hidden max-h-[90vh] overflow-y-auto">
+      <div class="flex items-center justify-between p-5 border-b border-slate-100">
+        <h2 class="font-bold text-slate-800">초대코드 발급</h2>
+        <button id="close-invite-modal" class="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100"><i data-lucide="x" class="w-5 h-5"></i></button>
+      </div>
+      <form id="invite-form" class="p-5 flex flex-col gap-3">
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1.5">구분</label>
+            <select id="ic-usertype" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-teal-400">
+              <option value="youth">🧒 청소년</option>
+              <option value="staff">🧑‍🏫 직원/교사</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1.5">권한</label>
+            <select id="ic-role" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-teal-400">
+              <option value="user">일반 사용자</option>
+              <option value="admin">관리자</option>
+            </select>
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1.5">이름 <span class="text-slate-400 font-normal">(선택)</span></label>
+          <input id="ic-name" type="text" placeholder="초대 대상 이름" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400 placeholder-slate-300">
+        </div>
+        <div id="ic-team-row">
+          <label class="block text-xs font-semibold text-slate-600 mb-1.5">활동단 <span class="text-slate-400 font-normal">(선택 · 복수 가능)</span></label>
+          <div id="ic-team-tags" class="flex flex-wrap gap-1.5 mb-2"></div>
+          <select id="ic-team-pick" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-teal-400"></select>
+        </div>
+        <div id="ic-dept-toggle-row" class="border border-slate-200 rounded-xl p-3 bg-slate-50/60">
+          <label class="flex items-center justify-between cursor-pointer">
+            <span class="text-xs font-semibold text-slate-700">부서 사용 <span class="text-slate-400 font-normal">(회원가입 시 부서 선택 활성화)</span></span>
+            <input type="checkbox" id="ic-dept-enabled" class="accent-teal-600 w-4 h-4">
+          </label>
+          <p class="text-[10px] text-slate-400 mt-1">활성화하면 가입자가 해당 활동단의 부서를 선택합니다(활동단 부서 설정 기준). 비활성화 시 부서 없이 가입.</p>
+        </div>
+        <div id="ic-staff-dept-row" class="hidden">
+          <label class="block text-xs font-semibold text-slate-600 mb-1.5">부서 <span class="text-slate-400 font-normal">(직원 · 선택)</span></label>
+          <input id="ic-staff-dept" type="text" placeholder="예: 운영지원팀" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400 placeholder-slate-300">
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1.5">지정 사용자 <span class="text-slate-400 font-normal">(선택)</span></label>
+            <input id="ic-target-user" type="text" placeholder="특정 아이디만" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400 placeholder-slate-300">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1.5">생성 개수</label>
+            <input id="ic-count" type="number" min="1" max="50" value="1" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400">
+          </div>
+        </div>
+        <button type="submit" class="w-full bg-teal-600 hover:bg-teal-700 text-white font-bold py-2.5 rounded-xl transition-all text-sm shadow-sm mt-1">발급</button>
       </form>
     </div>
   </div>

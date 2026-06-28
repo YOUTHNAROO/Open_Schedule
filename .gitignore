@@ -70,3 +70,12 @@ public/env.js
 
 # dataconnect generated files
 .dataconnect
+
+# 비밀키/로컬 산출물 (절대 커밋 금지)
+supabase/firebase-service-account.json
+supabase/.secrets/
+supabase/.temp/
+supabase/.branches/
+.DS_Store
+**/.DS_Store
+.claude/

@@ -1,19 +1,232 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // 비밀번호 찾기: 비인증 읽기(보안질문 조회), 쓰기는 인증 필요(secondaryApp 인증 컨텍스트)
+
+    // ─────────────────────────────────────────────────────────────
+    // 공통 헬퍼
+    // ─────────────────────────────────────────────────────────────
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    function userRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+    function isAdmin() {
+      return isSignedIn() && userRole() in ['admin', 'superadmin'];
+    }
+    // 게시글의 실제 작성자 UID (private/meta 에만 존재 — 익명 글도 여기엔 항상 저장)
+    function postAuthorUid(postId) {
+      return get(/databases/$(database)/documents/community_posts/$(postId)/private/meta).data.authorUid;
+    }
+    // 업데이트가 건드린 필드가 허용 목록에만 속하는지
+    function changedKeysOnly(allowed) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(allowed);
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // 기존 예약 시스템 컬렉션 (동작 보존 — 전역 catch-all 을 컬렉션별
+    // 재귀 와일드카드로 분리. 커뮤니티 private 문서 보호를 위해 전역
+    // catch-all 은 제거됨.)
+    // ─────────────────────────────────────────────────────────────
+
+    // 비밀번호 찾기: 비인증 읽기(보안질문 조회), 쓰기는 인증 필요
     match /user_recovery/{username} {
       allow read: if true;
-      allow write: if request.auth != null;
+      allow write: if isSignedIn();
     }
     // 초대코드: 비인증 읽기(회원가입 검증), 쓰기는 인증 필요
     match /invite_codes/{code} {
       allow read: if true;
-      allow write: if request.auth != null;
+      allow write: if isSignedIn();
     }
-    // 나머지 모든 문서: 인증된 사용자만
-    match /{document=**} {
-      allow read, write: if request.auth != null;
+
+    // 인증된 사용자만 접근하는 기존 컬렉션들
+    match /reservations/{document=**}    { allow read, write: if isSignedIn(); }
+    match /fixed_schedules/{document=**}  { allow read, write: if isSignedIn(); }
+    match /room_blocks/{document=**}      { allow read, write: if isSignedIn(); }
+    match /archive/{document=**}          { allow read, write: if isSignedIn(); }
+    match /teams/{document=**}            { allow read, write: if isSignedIn(); }
+    match /system_settings/{document=**}  { allow read, write: if isSignedIn(); }
+    match /users/{document=**}            { allow read, write: if isSignedIn(); }
+    match /notifications/{document=**}    { allow read, write: if isSignedIn(); }
+    match /activity_logs/{document=**}    { allow read, write: if isSignedIn(); }
+    match /login_logs/{document=**}       { allow read, write: if isSignedIn(); }
+    match /active_sessions/{document=**}  { allow read, write: if isSignedIn(); }
+    match /invite_code_logs/{document=**} { allow read, write: if isSignedIn(); }
+    match /contributors/{document=**}     { allow read, write: if isSignedIn(); }
+
+    // ─────────────────────────────────────────────────────────────
+    // 커뮤니티: 게시글
+    //  - 공개 문서(community_posts/{id})에는 익명 작성자 식별값을 절대
+    //    저장하지 않는다. 실제 authorUid 는 private/meta 에만 둔다.
+    //  - 익명 글: authorUid/authorNickname == null
+    //  - 실명 글: authorUid == 작성자, authorNickname 공개
+    // ─────────────────────────────────────────────────────────────
+    match /community_posts/{postId} {
+
+      allow read: if isSignedIn();
+
+      allow create: if isSignedIn()
+        && request.resource.data.status == 'ACTIVE'
+        && request.resource.data.reportCount == 0
+        && request.resource.data.keys().hasAll(['board', 'title', 'content', 'isAnonymous', 'status'])
+        && request.resource.data.title.size() <= 60
+        && request.resource.data.content.size() <= 1000
+        && (
+          request.resource.data.isAnonymous == true
+            // 익명 글: 식별값이 공개 문서에 새어나가면 안 됨
+            ? (!('authorUid' in request.resource.data) || request.resource.data.authorUid == null)
+              && (!('authorNickname' in request.resource.data) || request.resource.data.authorNickname == null)
+            // 실명 글: 본인 UID 로만 작성 가능
+            : request.resource.data.authorUid == request.auth.uid
+        );
+
+      // 작성자/관리자: 본문 수정·삭제. 그 외 로그인 유저: 집계 카운터만 증가.
+      // 자동 블라인드: 신고 누적이 5 이상이 되는 갱신에 한해 status→BLINDED 허용(§6).
+      allow update: if isSignedIn() && (
+            // 집계 카운터만 바꾸는 갱신(공감/스크랩/댓글수/조회/신고)은 get() 없이 즉시 허용
+            changedKeysOnly(['likeCount', 'scrapCount', 'commentCount', 'viewCount', 'reportCount', 'anonSeq'])
+            // 자동 블라인드: 신고 5 이상이 되는 갱신만 status→BLINDED 허용(§6)
+            || (changedKeysOnly(['reportCount', 'status'])
+                && request.resource.data.status == 'BLINDED'
+                && request.resource.data.reportCount >= 5)
+            || isAdmin()
+            || postAuthorUid(postId) == request.auth.uid
+          );
+      allow delete: if isSignedIn() && (postAuthorUid(postId) == request.auth.uid || isAdmin());
+
+      // 신고(중복 방지): 문서 ID = 신고자 uid. 본인 1회만 생성, 관리자 조회/삭제.
+      match /reports/{uid} {
+        allow read:   if isSignedIn() && (request.auth.uid == uid || isAdmin());
+        allow create: if isSignedIn() && request.auth.uid == uid;
+        allow update: if false;
+        allow delete: if isAdmin();
+      }
+
+      // 실제 작성자 매핑 — 본인 또는 관리자만 읽기(De-anonymize 권한)
+      match /private/{docId} {
+        allow read:   if isSignedIn() && (resource.data.authorUid == request.auth.uid || isAdmin());
+        allow create: if isSignedIn() && request.resource.data.authorUid == request.auth.uid;
+        allow update, delete: if isAdmin();
+      }
+
+      // 포스트 내 익명 번호 매핑 — 문서 ID = uid. 본인 것만 읽기/쓰기.
+      // 공개되는 건 comment.anonNum(정수)뿐이라 신원은 드러나지 않는다.
+      match /anonusers/{uid} {
+        allow read:   if isSignedIn() && (request.auth.uid == uid || isAdmin());
+        allow create: if isSignedIn() && request.auth.uid == uid;
+        allow update, delete: if false;
+      }
+
+      // 댓글 — 공개 문서에 식별값 미포함(익명 댓글은 anonNum 만)
+      match /comments/{commentId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn()
+          && request.resource.data.content.size() <= 1000
+          && request.resource.data.status == 'ACTIVE'
+          && (
+            request.resource.data.isAnonymous == true
+              ? (!('authorUid' in request.resource.data) || request.resource.data.authorUid == null)
+              : request.resource.data.authorUid == request.auth.uid
+          );
+        // 댓글 작성자 매핑(본인/관리자만)
+        match /private/{docId} {
+          allow read:   if isSignedIn() && (resource.data.authorUid == request.auth.uid || isAdmin());
+          allow create: if isSignedIn() && request.resource.data.authorUid == request.auth.uid;
+          allow update, delete: if isAdmin();
+        }
+        allow update: if isSignedIn() && (isAdmin() || changedKeysOnly(['likeCount', 'status']));
+        allow delete: if isAdmin();
+      }
+
+      // 이미지(base64 data URL) — 무과금: Storage 대신 Firestore 저장. 작성 시 본인이 생성.
+      match /images/{imgId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn();
+        allow update, delete: if isAdmin();
+      }
+
+      // 중복 좋아요 방지 — 문서 ID = uid, 본인만 생성/삭제
+      match /likes/{uid} {
+        allow read: if isSignedIn();
+        allow create, delete: if isSignedIn() && request.auth.uid == uid;
+      }
+      // 스크랩(개인 북마크) — 본인만
+      match /scraps/{uid} {
+        allow read, create, delete: if isSignedIn() && request.auth.uid == uid;
+      }
+    }
+
+    // 신고: 작성은 로그인 유저(본인 uid), 조회·집계는 관리자
+    match /community_reports/{reportId} {
+      allow read: if isAdmin();
+      allow create: if isSignedIn() && request.resource.data.reporterUid == request.auth.uid;
+      allow update, delete: if isAdmin();
+    }
+
+    // 강의·활동 리뷰
+    match /community_reviews/{activityId}/items/{reviewId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn()
+        && request.resource.data.rating >= 1 && request.resource.data.rating <= 5
+        && (
+          request.resource.data.isAnonymous == true
+            ? (!('authorUid' in request.resource.data) || request.resource.data.authorUid == null)
+            : request.resource.data.authorUid == request.auth.uid
+        );
+      match /private/{docId} {
+        allow read:   if isSignedIn() && (resource.data.authorUid == request.auth.uid || isAdmin());
+        allow create: if isSignedIn() && request.resource.data.authorUid == request.auth.uid;
+      }
+    }
+
+    // 번개(공강 모임): 누구나 조회, 본인이 호스트로 생성, 참여자 배열만 갱신 허용
+    match /community_meetups/{meetupId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.hostUid == request.auth.uid;
+      allow update: if isSignedIn() && (
+            resource.data.hostUid == request.auth.uid
+            || isAdmin()
+            || changedKeysOnly(['participants', 'participantCount'])
+          );
+      allow delete: if isSignedIn() && (resource.data.hostUid == request.auth.uid || isAdmin());
+    }
+
+    // 게시판 정의(이름·기능 토글). 누구나 읽기, 관리자만 생성·수정·삭제.
+    match /community_boards/{boardId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // 커뮤니티 메타(기본 게시판 시드 플래그 등). 관리자만 쓰기.
+    match /community_meta/{docId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // 개인 색인(내 글/댓글/스크랩 목록) — 본인·관리자만. 프로필 조회용(collectionGroup 불필요).
+    match /community_index/{uid}/{type}/{postId} {
+      allow read:  if isSignedIn() && (request.auth.uid == uid || isAdmin());
+      allow write: if isSignedIn() && request.auth.uid == uid;
+    }
+
+    // 1:1 익명채팅 대기열 — 매칭 시 상대 큐도 제거해야 하므로 delete는 로그인 유저 허용(가벼운 마커)
+    match /chat_queue/{uid} {
+      allow read:   if isSignedIn();
+      allow create: if isSignedIn() && request.auth.uid == uid;
+      allow delete: if isSignedIn();
+    }
+    // 1:1 채팅방 — 참가자만 읽기/쓰기
+    match /chat_rooms/{roomId} {
+      allow read:   if isSignedIn() && request.auth.uid in resource.data.participants;
+      allow create: if isSignedIn() && request.auth.uid in request.resource.data.participants;
+      allow update: if isSignedIn() && request.auth.uid in resource.data.participants;
+      match /messages/{msgId} {
+        allow read:   if isSignedIn() && request.auth.uid in get(/databases/$(database)/documents/chat_rooms/$(roomId)).data.participants;
+        allow create: if isSignedIn()
+          && request.resource.data.senderUid == request.auth.uid
+          && request.auth.uid in get(/databases/$(database)/documents/chat_rooms/$(roomId)).data.participants;
+      }
     }
   }
 }

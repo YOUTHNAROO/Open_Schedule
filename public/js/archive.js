@@ -1,7 +1,8 @@
 import { supabase } from './supabase.js';
 import S from './state.js';
-import { HOURS, ALL_ROOMS, FLOORS } from './constants.js';
+import { HOURS, ALL_ROOMS, FLOORS, DAYS } from './constants.js';
 import { esc, getTeam } from './utils.js';
+import { buildMergedReservations } from './ui.js';
 
 // ==================== ARCHIVE VIEWER ====================
 async function openArchiveViewer() {

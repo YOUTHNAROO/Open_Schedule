@@ -2,6 +2,8 @@ import { supabase, dbGetMany } from './supabase.js';
 import S from './state.js';
 import { DEFAULT_TEAMS } from './constants.js';
 import { buildMergedReservations } from './ui.js';
+import { setupPresence, subscribePresence } from './presence.js';
+import { subscribeNotifications } from './notifications.js';
 
 // ── 변환 함수 ─────────────────────────────────────────────────
 function rowToReservation(row) {

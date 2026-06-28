@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>커뮤니티 관리 · 유스나루</title>
+<link rel="stylesheet" href="assets/everytime.css?v=9" />
+<script src="../env.js"></script>
+<style>
+  .admin-body{flex:1;overflow-y:auto;padding-bottom:40px}
+  .acard{background:var(--surface);border-bottom:1px solid var(--border);padding:14px 16px}
+  .acard .atop{display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap}
+  .acard h4{font-size:15px;font-weight:700;line-height:1.4;margin:2px 0 4px}
+  .acard .abody{font-size:13px;color:var(--muted);line-height:1.5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .acard .ameta{font-size:11px;color:var(--faint);font-weight:600;margin-top:4px}
+  .badge{font-size:10px;font-weight:800;padding:2px 7px;border-radius:6px}
+  .b-rep{background:#fef2f2;color:var(--danger)}
+  .b-blind{background:#1f2937;color:#fff}
+  .b-active{background:#ecfdf5;color:#16a34a}
+  .b-board{background:var(--anon-bg);color:var(--anon)}
+  .arow-btns{display:flex;gap:7px;margin-top:10px;flex-wrap:wrap}
+  .abtn{border:1px solid var(--border);background:var(--surface);color:var(--fg);font-size:12px;font-weight:700;padding:7px 11px;border-radius:9px;cursor:pointer;display:flex;align-items:center;gap:5px}
+  .abtn.warn{color:var(--danger);border-color:#fecaca;background:#fff5f5}
+  .abtn.prim{color:#fff;background:var(--primary);border-color:var(--primary)}
+  .abtn svg{width:14px;height:14px}
+  .audit{padding:12px 16px;border-bottom:1px solid var(--line);font-size:13px}
+  .audit b{font-weight:700}
+  .audit .at{font-size:11px;color:var(--faint);font-weight:600}
+  .modal .reason-list{text-align:left;font-size:13px;color:var(--muted);max-height:240px;overflow:auto;margin-top:6px}
+  .modal .reason-list div{padding:6px 0;border-bottom:1px solid var(--line)}
+  .deanon-box{text-align:left;background:var(--anon-bg);border-radius:12px;padding:12px 14px;margin-top:6px;font-size:13.5px;line-height:1.7}
+  .deanon-box b{color:var(--primary)}
+</style>
+</head>
+<body>
+<div class="app" data-od-id="community-admin">
+  <header class="pagehead">
+    <a class="back-btn" href="home.html" aria-label="뒤로"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg></a>
+    <span class="title">커뮤니티 관리</span>
+    <span class="spacer"></span>
+  </header>
+  <nav class="tabs" id="tabs" style="padding:0 12px;border-bottom:1px solid var(--border);background:var(--surface)">
+    <button class="tab active" data-tab="reported">신고된 글</button>
+    <button class="tab" data-tab="recent">최근 글</button>
+    <button class="tab" data-tab="audit">감사 로그</button>
+    <button class="tab" data-tab="chatlogs" id="chatLogsTab" style="display:none">채팅 로그</button>
+  </nav>
+  <main class="admin-body" id="list"></main>
+</div>
+
+<!-- 정보 모달 (작성자 확인 결과 / 신고 사유) -->
+<div class="modal-wrap" id="infoModal">
+  <div class="modal-bg" id="infoBg"></div>
+  <div class="modal" style="text-align:left">
+    <h4 id="infoTitle" style="text-align:center">정보</h4>
+    <div id="infoBody"></div>
+    <div class="modal-actions"><button class="btn primary block" id="infoClose">닫기</button></div>
+  </div>
+</div>
+
+<!-- 작성자 확인 1단계: 사유 입력 -->
+<div class="modal-wrap" id="deanonModal">
+  <div class="modal-bg" id="deanonBg"></div>
+  <div class="modal" style="text-align:left">
+    <h4 style="text-align:center">작성자 확인</h4>
+    <p style="margin:6px 0 4px">아래 사유는 <b>감사 로그(activity_logs)</b>에 영구 기록됩니다.</p>
+    <div class="field-label">열람 사유 (필수)</div>
+    <textarea class="m-area" id="deanonReason" placeholder="예: 반복적 욕설·신고 누적으로 인한 어뷰징 대응"></textarea>
+    <div class="modal-actions">
+      <button class="btn ghost block" id="deanonCancel" type="button">취소</button>
+      <button class="btn primary block" id="deanonNext" type="button">다음</button>
+    </div>
+  </div>
+</div>
+
+<!-- 작성자 확인 2단계: 경고 확인 -->
+<div class="modal-wrap" id="warnModal">
+  <div class="modal-bg" id="warnBg"></div>
+  <div class="modal" style="text-align:left">
+    <h4 style="text-align:center;color:var(--danger)">정말 확인할까요?</h4>
+    <div class="m-warn">
+      이 작성자 확인은 <b>감사 로그(감사 로그)</b>에 기록되며, 익명으로 활동한 청소년의 신원을 드러내는 행위는
+      해당 이용자의 <b>익명성과 사생활을 침해</b>할 수 있습니다. 반드시 정당한 사유가 있을 때만 진행하세요.
+    </div>
+    <div class="modal-actions">
+      <button class="btn ghost block" id="warnCancel" type="button">취소</button>
+      <button class="btn danger block" id="warnConfirm" type="button">확인하고 열람</button>
+    </div>
+  </div>
+</div>
+
+<!-- 채팅 로그 뷰어(최고관리자) -->
+<div class="modal-wrap" id="chatLogModal">
+  <div class="modal-bg" id="chatLogBg"></div>
+  <div class="modal" style="text-align:left;width:min(380px,92%)">
+    <h4 id="chatLogTitle" style="text-align:center">대화 로그</h4>
+    <div class="clog-meta" id="chatLogMeta"></div>
+    <div class="clog-list" id="chatLogList" style="max-height:46vh;overflow:auto"></div>
+    <div class="modal-actions">
+      <button class="btn ghost block" id="chatLogClose" type="button">닫기</button>
+      <button class="btn primary block" id="chatLogExport" type="button">파일로 내보내기</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script type="module">
+  import {
+    requireLoginOrRedirect, getCurrentUser, getReportedPosts, getRecentPosts,
+    getPostReports, getCommunityAuditLogs, deanonymizePost, adminSetPostStatus,
+    adminDeletePost, boardName, getChatRoomsForAdmin, getChatMessagesForAdmin
+  } from './community-data.js?v=9';
+  import { esc, timeAgo, toast, emptyHTML } from './community-ui.js?v=9';
+
+  const me = await requireLoginOrRedirect();
+  const $ = id => document.getElementById(id);
+  if (!me.isAdmin) {
+    document.querySelector('.admin-body').innerHTML = emptyHTML('관리자 전용 페이지입니다.');
+    document.querySelector('#tabs').style.display = 'none';
+    throw 0;
+  }
+  // 채팅 로그 탭은 최고관리자에게만 노출
+  if (me.isSuperAdmin) $('chatLogsTab').style.display = '';
+
+  let tab = 'reported';
+  const tabs = [...document.querySelectorAll('#tabs .tab')];
+  tabs.forEach(t => t.onclick = () => { tab = t.dataset.tab; tabs.forEach(x => x.classList.toggle('active', x === t)); load(); });
+
+  function statusBadge(p) {
+    return p.status === 'BLINDED' ? '<span class="badge b-blind">블라인드</span>' : '<span class="badge b-active">노출중</span>';
+  }
+  function postCard(p) {
+    return `<div class="acard" data-id="${esc(p.id)}">
+      <div class="atop">
+        <span class="badge b-board">${esc(boardName(p.board))}</span>
+        ${statusBadge(p)}
+        ${p.reportCount ? `<span class="badge b-rep">신고 ${p.reportCount}</span>` : ''}
+        <span class="ameta" style="margin-left:auto">${timeAgo(p.createdAt)} · 공감 ${p.likeCount || 0} · 댓글 ${p.commentCount || 0}</span>
+      </div>
+      ${p.title ? `<h4>${esc(p.title)}</h4>` : ''}
+      <div class="abody">${esc(p.content || '')}</div>
+      <div class="ameta">${p.isAnonymous ? '익명 글' : '닉네임: ' + esc(p.authorNickname || '')}</div>
+      <div class="arow-btns">
+        <a class="abtn" href="post-detail.html?id=${esc(p.id)}" target="_blank"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h6v6M10 14 21 3M21 14v7H3V3h7"/></svg>열기</a>
+        <button class="abtn deanon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>작성자 확인</button>
+        ${p.reportCount ? '<button class="abtn reasons"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>신고 사유</button>' : ''}
+        <button class="abtn ${p.status === 'BLINDED' ? 'prim' : ''} blind">${p.status === 'BLINDED' ? '블라인드 해제' : '블라인드'}</button>
+        <button class="abtn warn del"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>삭제</button>
+      </div>
+    </div>`;
+  }
+  function auditRow(l) {
+    const action = { '커뮤니티_작성자조회': '작성자 확인', '커뮤니티_블라인드': '블라인드', '커뮤니티_블라인드해제': '블라인드 해제', '커뮤니티_삭제': '삭제' }[l.action] || l.action;
+    return `<div class="audit"><b>${esc(l.displayName || l.username || '관리자')}</b> · ${esc(action)} <span class="at">${timeAgo(l.timestamp)}</span><div class="at">${esc(l.target || '')}${l.after?.reason ? ' · 사유: ' + esc(l.after.reason) : ''}${l.after?.authorUid ? ' · 작성자 uid: ' + esc(l.after.authorUid) : ''}</div></div>`;
+  }
+
+  function bindCards() {
+    [...document.querySelectorAll('.acard')].forEach(card => {
+      const id = card.dataset.id;
+      card.querySelector('.deanon').onclick = () => openDeanon(id);
+      const reasonsBtn = card.querySelector('.reasons');
+      if (reasonsBtn) reasonsBtn.onclick = async () => {
+        try {
+          const rs = await getPostReports(id);
+          showInfo(`신고 사유 (${rs.length})`, rs.length
+            ? `<div class="reason-list">${rs.map(r => `<div>${esc(r.reason || '(사유 없음)')} <span class="at" style="float:right">${timeAgo(r.createdAt)}</span></div>`).join('')}</div>`
+            : '<p style="color:var(--faint)">사유 기록이 없습니다.</p>');
+        } catch (e) { toast(e.message || '조회 실패'); }
+      };
+      card.querySelector('.blind').onclick = async () => {
+        const blinded = card.querySelector('.blind').textContent.includes('해제');
+        try { await adminSetPostStatus(id, blinded ? 'ACTIVE' : 'BLINDED'); toast(blinded ? '블라인드를 해제했어요' : '블라인드 처리했어요'); load(); }
+        catch (e) { toast(e.message || '실패'); }
+      };
+      card.querySelector('.del').onclick = async () => {
+        if (!confirm('이 게시글을 삭제할까요? 되돌릴 수 없습니다.')) return;
+        try { await adminDeletePost(id); toast('삭제했어요'); load(); } catch (e) { toast(e.message || '삭제 실패'); }
+      };
+    });
+  }
+
+  function showInfo(title, html) {
+    $('infoTitle').textContent = title; $('infoBody').innerHTML = html;
+    $('infoModal').classList.add('open');
+  }
+  $('infoClose').onclick = $('infoBg').onclick = () => $('infoModal').classList.remove('open');
+
+  /* ── 작성자 확인(De-anonymize): 2단계 모달(사유 입력 → 경고 확인) ── */
+  let _deanonId = null;
+  function openDeanon(id) {
+    _deanonId = id;
+    $('deanonReason').value = '';
+    $('deanonModal').classList.add('open');
+    setTimeout(() => $('deanonReason').focus(), 50);
+  }
+  const closeDeanon = () => $('deanonModal').classList.remove('open');
+  const closeWarn = () => $('warnModal').classList.remove('open');
+  $('deanonCancel').onclick = $('deanonBg').onclick = () => { closeDeanon(); _deanonId = null; };
+  $('deanonNext').onclick = () => {
+    const reason = $('deanonReason').value.trim();
+    if (!reason) { toast('열람 사유를 입력하세요'); $('deanonReason').focus(); return; }
+    closeDeanon();
+    $('warnModal').classList.add('open');
+  };
+  $('warnCancel').onclick = $('warnBg').onclick = () => { closeWarn(); _deanonId = null; };
+  $('warnConfirm').onclick = async () => {
+    const reason = $('deanonReason').value.trim();
+    const id = _deanonId;
+    closeWarn(); _deanonId = null;
+    if (!id || !reason) return;
+    try {
+      const a = await deanonymizePost(id, reason);
+      showInfo('실제 작성자', `<div class="deanon-box">닉네임: <b>${esc(a.nickname || '-')}</b><br>아이디: <b>${esc(a.username || '-')}</b><br>UID: ${esc(a.uid)}</div><p style="font-size:12px;color:var(--faint);margin-top:10px">이 조회는 감사 로그(activity_logs)에 사유와 함께 기록되었습니다.</p>`);
+    } catch (e) { toast(e.message || '조회 실패'); }
+  };
+
+  /* ── 채팅 로그(최고관리자) ── */
+  function chatRoomRow(r) {
+    const parts = (r.participants || []).join(', ');
+    const st = r.status === 'ended' ? '종료됨' : (r.status === 'active' ? '진행중' : esc(r.status || ''));
+    return `<div class="acard" data-room="${esc(r.id)}">
+      <div class="atop">
+        <span class="badge b-board">대화방</span>
+        <span class="badge ${r.status === 'ended' ? 'b-blind' : 'b-active'}">${st}</span>
+        <span class="ameta" style="margin-left:auto">${timeAgo(r.createdAt)}</span>
+      </div>
+      <div class="abody">참여자 UID: ${esc(parts || '-')}</div>
+      <div class="arow-btns">
+        <button class="abtn openlog"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.5 8.5 0 0 1-12.3 7.6L3 21l1.9-5.7A8.5 8.5 0 1 1 21 11.5Z"/></svg>대화 보기</button>
+      </div>
+    </div>`;
+  }
+
+  let _logRoom = null, _logMsgs = [];
+  async function openChatLog(roomId, room) {
+    _logRoom = room || { id: roomId };
+    $('chatLogTitle').textContent = '대화 로그';
+    $('chatLogMeta').textContent = `방 ${roomId} · 참여자 ${(room?.participants || []).join(', ') || '-'}`;
+    $('chatLogList').innerHTML = emptyHTML('불러오는 중…');
+    $('chatLogModal').classList.add('open');
+    try {
+      _logMsgs = await getChatMessagesForAdmin(roomId);
+      const parts = room?.participants || [];
+      $('chatLogList').innerHTML = _logMsgs.length ? _logMsgs.map(m => {
+        const side = parts.length && m.senderUid === parts[0] ? 'a' : 'b';
+        const t = m.createdAt ? timeAgo(m.createdAt) : '';
+        return `<div class="clog-msg ${side}"><div class="who">${esc(m.senderUid || '')} · ${t}</div>${esc(m.text || '')}</div>`;
+      }).join('') : emptyHTML('메시지가 없습니다.');
+    } catch (e) { $('chatLogList').innerHTML = emptyHTML(e.message || '불러오기 실패'); }
+  }
+  $('chatLogClose').onclick = $('chatLogBg').onclick = () => $('chatLogModal').classList.remove('open');
+  $('chatLogExport').onclick = () => {
+    if (!_logRoom) return;
+    const lines = [
+      `유스나루 1:1 채팅 로그`,
+      `방 ID: ${_logRoom.id}`,
+      `참여자: ${(_logRoom.participants || []).join(', ')}`,
+      `생성: ${_logRoom.createdAt?.seconds ? new Date(_logRoom.createdAt.seconds * 1000).toLocaleString('ko-KR') : '-'}`,
+      `상태: ${_logRoom.status || ''}`,
+      `내보낸 시각: ${new Date().toLocaleString('ko-KR')}`,
+      '─'.repeat(40),
+      ..._logMsgs.map(m => {
+        const t = m.createdAt?.seconds ? new Date(m.createdAt.seconds * 1000).toLocaleString('ko-KR') : '';
+        return `[${t}] ${m.senderUid}: ${m.text || ''}`;
+      }),
+    ];
+    const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `chatlog_${_logRoom.id}.txt`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  };
+
+  async function load() {
+    $('list').innerHTML = emptyHTML('불러오는 중…');
+    try {
+      if (tab === 'audit') {
+        const logs = await getCommunityAuditLogs({ max: 100 });
+        $('list').innerHTML = logs.length ? logs.map(auditRow).join('') : emptyHTML('관리 활동 기록이 없습니다.');
+        return;
+      }
+      if (tab === 'chatlogs') {
+        const rooms = await getChatRoomsForAdmin({ max: 100 });
+        $('list').innerHTML = rooms.length ? rooms.map(chatRoomRow).join('') : emptyHTML('대화방이 없습니다.');
+        [...document.querySelectorAll('.acard[data-room]')].forEach(card => {
+          const rid = card.dataset.room;
+          const room = rooms.find(r => r.id === rid);
+          card.querySelector('.openlog').onclick = () => openChatLog(rid, room);
+        });
+        return;
+      }
+      const posts = tab === 'reported' ? await getReportedPosts({ max: 80 }) : await getRecentPosts({ max: 80 });
+      $('list').innerHTML = posts.length ? posts.map(postCard).join('')
+        : emptyHTML(tab === 'reported' ? '신고된 글이 없습니다.' : '게시글이 없습니다.');
+      bindCards();
+    } catch (e) {
+      $('list').innerHTML = emptyHTML((e.message || '불러오기 실패') + (String(e).includes('index') ? ' (인덱스 생성 중일 수 있어요)' : ''));
+    }
+  }
+  load();
+</script>
+</body>
+</html>

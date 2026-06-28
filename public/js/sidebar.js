@@ -1,8 +1,10 @@
 import S from './state.js';
-import { db, collection, addDoc, serverTimestamp, query, orderBy, getDocs } from './firebase.js';
 import { HOURS, DAYS, FLOORS, ALL_ROOMS } from './constants.js';
-import { getWeekId, esc, getWeekDateRange, getWeeksInMonth } from './utils.js';
+import { getWeekId, esc, getWeekDateRange, getWeeksInMonth, formatWeekLabel } from './utils.js';
 import { showToast } from './ui.js';
+import { addFixedScheduleRange } from './fixed.js';
+import { clearAllSubscriptions, subscribeToReservations, subscribeToFixedSchedules, subscribeToActivityLogs, subscribeRoomBlocks } from './data.js';
+import { renderDayTabs } from './render.js';
 
 // ==================== LEFT NAV SIDEBAR ====================
 let leftNavMonth = new Date();
@@ -40,9 +42,8 @@ function renderLeftNav() {
             const { start, end } = getWeekDateRange(wid);
             const fmt = d => `${d.getMonth()+1}/${d.getDate()}`;
             const isCurrent = wid === S.currentWeekId;
-            const wNum = wid.split('-W')[1];
             return `<button onclick="navigateToWeek('${wid}')" class="w-full text-left px-2.5 py-1.5 rounded-lg text-xs transition-colors ${isCurrent ? 'bg-teal-500 text-white font-bold' : 'hover:bg-slate-100 text-slate-700'}">
-                <div class="font-bold">${parseInt(wNum)}주차</div>
+                <div class="font-bold">${formatWeekLabel(wid)}</div>
                 <div class="text-[10px] ${isCurrent ? 'text-teal-100' : 'text-slate-400'}">${fmt(start)} ~ ${fmt(end)}</div>
             </button>`;
         }).join('');
@@ -54,14 +55,18 @@ function renderLeftNav() {
 function navigateToWeek(weekId) {
     S.currentWeekId = weekId;
     const weekEl = document.getElementById('week-display');
-    if (weekEl) weekEl.textContent = S.currentWeekId;
+    if (weekEl) weekEl.textContent = formatWeekLabel(S.currentWeekId);
     const { start } = getWeekDateRange(weekId);
     leftNavMonth = new Date(start.getFullYear(), start.getMonth(), 1);
     clearAllSubscriptions();
     subscribeToReservations();
     subscribeToFixedSchedules();
     subscribeToActivityLogs();
+    subscribeRoomBlocks();
+    renderDayTabs();
     renderLeftNav();
+    // 모바일에서 주차 선택 시 플로팅 캘린더 닫기
+    if (window.innerWidth < 1280) closeLeftNavOverlay();
 }
 window.navigateToWeek = navigateToWeek;
 
@@ -78,13 +83,53 @@ function setupLeftNav() {
         renderLeftNav();
     });
 
+    let _lnavToggleLock = 0;
     document.getElementById('btn-left-nav-toggle')?.addEventListener('click', () => {
         const sidebar = document.getElementById('left-nav-sidebar');
         if (!sidebar) return;
-        const isHidden = sidebar.classList.contains('hidden');
-        sidebar.classList.toggle('hidden', !isHidden);
-        sidebar.classList.toggle('flex', isHidden);
+        // 모바일 터치+클릭 중복 발생 방지(ghost click): 400ms 내 재호출 무시
+        const now = Date.now();
+        if (now - _lnavToggleLock < 400) return;
+        _lnavToggleLock = now;
+        // 결정적 토글: 현재 표시 여부를 읽어 명시적으로 열기/닫기
+        if (sidebar.classList.contains('hidden')) openLeftNavOverlay();
+        else closeLeftNavOverlay();
     });
+}
+
+// 모바일/태블릿(<1280px)에서는 좌측 캘린더를 플로팅 오버레이로 띄워 확실히 보이게 한다.
+function openLeftNavOverlay() {
+    const sidebar = document.getElementById('left-nav-sidebar');
+    if (!sidebar) return;
+    sidebar.classList.remove('hidden');
+    sidebar.classList.add('flex');
+    if (window.innerWidth < 1280) {
+        Object.assign(sidebar.style, {
+            position: 'fixed', top: '60px', left: '10px', right: 'auto', width: '15rem',
+            zIndex: '95', maxHeight: '80vh', overflowY: 'auto',
+            background: '#fff', borderRadius: '16px',
+            boxShadow: '0 14px 44px rgba(15,23,42,.22)', padding: '12px',
+        });
+        let bd = document.getElementById('lnav-backdrop');
+        if (!bd) {
+            bd = document.createElement('div');
+            bd.id = 'lnav-backdrop';
+            Object.assign(bd.style, { position: 'fixed', inset: '0', zIndex: '94', background: 'rgba(15,23,42,.35)' });
+            bd.addEventListener('click', closeLeftNavOverlay);
+            document.body.appendChild(bd);
+        }
+        bd.style.display = 'block';
+    }
+}
+
+function closeLeftNavOverlay() {
+    const sidebar = document.getElementById('left-nav-sidebar');
+    if (!sidebar) return;
+    sidebar.classList.add('hidden');
+    sidebar.classList.remove('flex');
+    sidebar.removeAttribute('style');
+    const bd = document.getElementById('lnav-backdrop');
+    if (bd) bd.style.display = 'none';
 }
 
 // ==================== SIDE TABS ====================
