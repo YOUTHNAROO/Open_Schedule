@@ -19,18 +19,21 @@ import { toggleNotifPanel } from './notifications.js';
 /**
  * 표시명(display name) 계산. 관리자 측 데이터 계약과 정확히 일치시킴.
  * - staff: department ? `${department}/${name}` : `${name}`
- * - youth:
+ * - youth 관리자(운영): `[운영]${teamName}/${name}` (부서 없음)
+ * - youth 일반:
  *     teamName && department  → `${teamName}/${department}/${name}`
  *     teamName && !department → `${teamName}/${name}`
  *     !teamName               → `${name}`
  */
-function computeDisplayName({ userType, teamName, department, name } = {}) {
+function computeDisplayName({ userType, teamName, department, name, role } = {}) {
     const nm = (name || '').trim();
     const dept = (department || '').trim();
     const team = (teamName || '').trim();
     if (userType === 'staff') {
         return dept ? `${dept}/${nm}` : `${nm}`;
     }
+    // 청소년 관리자 = 운영진: [운영] 접두어, 부서 없이 활동단만
+    if (role === 'admin' || role === 'superadmin') return team ? `[운영]${team}/${nm}` : `[운영]${nm}`;
     // youth (default)
     if (team && dept) return `${team}/${dept}/${nm}`;
     if (team)         return `${team}/${nm}`;
@@ -56,7 +59,7 @@ function refreshRegDisplayName() {
     const teamName = ctx?.teamName || null;
     const department = _getRegDepartment();
     const name = document.getElementById('reg-name')?.value || '';
-    const computed = computeDisplayName({ userType, teamName, department, name });
+    const computed = computeDisplayName({ userType, teamName, department, name, role: ctx?.role });
     const out = document.getElementById('reg-dispname');
     if (out) out.value = computed;
 
@@ -110,7 +113,7 @@ async function applyRegInvite() {
     const userType = meta.userType === 'staff' ? 'staff' : 'youth';
     const allowed = codeRow.allowed_teams || [];
 
-    const ctx = { userType, teamName: null, deptMode: 'none', deptList: [], fixedDept: '' };
+    const ctx = { userType, teamName: null, deptMode: 'none', deptList: [], fixedDept: '', role: codeRow.role || 'user' };
 
     // 구분 뱃지
     const utInput = document.getElementById('reg-usertype');
@@ -269,7 +272,7 @@ async function handleRegister(e) {
             try { const t = await dbGet('teams', { id: allowedTeams[0] }); teamName = t?.name || null; } catch {}
         }
         const department = _getRegDepartment();
-        const dispName = computeDisplayName({ userType, teamName, department, name: realName });
+        const dispName = computeDisplayName({ userType, teamName, department, name: realName, role: codeRow.role });
         if (!dispName) { showErr('표시명을 생성할 수 없습니다. 이름을 확인해주세요.'); return; }
 
         // 중복 아이디 확인. 활성 계정이면 차단, 비활성(삭제됨)이면 '재가입'으로 처리.
