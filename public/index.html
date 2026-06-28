@@ -304,6 +304,24 @@
         <span id="toast-msg">알림</span>
     </div>
 
+    <!-- ===================== 알림 권한 안내 모달 (자체 디자인 · 한국어) ===================== -->
+    <div id="push-permission-modal" class="hidden fixed inset-0 z-[210] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-xs overflow-hidden">
+            <div class="bg-gradient-to-br from-teal-500 to-teal-600 px-5 py-5 text-white text-center">
+                <div class="text-3xl mb-1">🔔</div>
+                <h2 class="font-bold text-lg">알림을 받으시겠어요?</h2>
+            </div>
+            <div class="p-5">
+                <p class="text-sm text-slate-600 leading-relaxed text-center">예약 승인, 일정 변경 등 중요한 소식을<br>앱을 켜두지 않아도 알림으로 받아볼 수 있어요.</p>
+                <p class="text-[11px] text-slate-400 text-center mt-2">‘받기’를 누르면 브라우저의 알림 허용 창이 나타납니다.</p>
+                <div class="flex gap-2 mt-4">
+                    <button id="push-perm-later" type="button" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold py-2.5 rounded-xl transition-colors">나중에</button>
+                    <button id="push-perm-allow" type="button" class="flex-1 bg-teal-600 hover:bg-teal-700 text-white text-sm font-bold py-2.5 rounded-xl transition-colors">받기</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- ===================== 개인정보 처리방침 모달 ===================== -->
     <div id="privacy-modal" class="hidden fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm border border-slate-200 max-h-[80vh] flex flex-col">
