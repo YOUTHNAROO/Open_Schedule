@@ -28,7 +28,7 @@
     } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
     import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
     // Supabase로 데이터 통일 중 — 유저/팀/초대코드는 Supabase, 자격증명은 Firebase Auth.
-    import { dbGet, dbGetMany, dbInsert, dbUpdate, dbDelete } from './js/supabase.js';
+    import { supabase, dbGet, dbGetMany, dbInsert, dbUpdate, dbDelete } from './js/supabase.js';
 
     // ========== FIREBASE CONFIG ==========
     const firebaseConfig = {
@@ -581,33 +581,81 @@
     // ========== PENDING RESERVATIONS ==========
     const DAY_LABELS = { mon:'월', tue:'화', wed:'수', thu:'목', fri:'금', sat:'토', sun:'일' };
 
+    // 관리자 페이지 실시간 구독: 새 예약 신청/변경 시 대시보드 자동 갱신(새로고침 불필요).
+    let _adminRtWired = false;
+    function setupAdminRealtime() {
+      if (_adminRtWired) return;
+      _adminRtWired = true;
+      let t = null;
+      const refreshIfDashboard = () => {
+        clearTimeout(t);
+        t = setTimeout(() => { if (activeTab === 'dashboard') renderDashboard(); }, 400);
+      };
+      supabase.channel('admin-reservations-rt')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'reservations' }, refreshIfDashboard)
+        .subscribe();
+    }
+
+    // 예약은 Supabase reservations가 단일 출처(Firestore 아님). status='pending'인 신청 조회.
     async function getPendingReservations() {
-      const weekId = getWeekId(new Date());
-      const days = ['mon','tue','wed','thu','fri','sat','sun'];
-      const pending = [];
-      await Promise.all(days.map(async day => {
-        const snap = await getDocs(query(collection(db, `reservations/${weekId}/${day}`), where('status','==','pending')));
-        snap.forEach(d => pending.push({ weekId, day, key: d.id, ...d.data() }));
-      }));
-      pending.sort((a, b) => {
-        const di = ['mon','tue','wed','thu','fri','sat','sun'];
-        return di.indexOf(a.day) - di.indexOf(b.day) || (a.key < b.key ? -1 : 1);
-      });
-      return pending;
+      const rows = await dbGetMany('reservations', { status: 'pending' });
+      const di = ['mon','tue','wed','thu','fri','sat','sun'];
+      return (rows || []).map(r => ({
+        weekId: r.week_id, day: r.day_id, key: r.key,
+        teamId: r.team_id, teamName: r.team_name,
+        userId: r.user_id, userName: r.user_name,
+        room: r.room, hour: r.hour, note: r.note || '',
+      })).sort((a, b) => di.indexOf(a.day) - di.indexOf(b.day) || (a.key < b.key ? -1 : 1));
+    }
+
+    // 예약 승인/거절 결과를 신청자에게 알림으로 발송(#3) + OneSignal 푸시.
+    async function notifyReservationDecision(row, decision) {
+      if (!row?.user_id) return;
+      const dayLabel = DAY_LABELS[row.day_id] || row.day_id;
+      const hour = (row.key || '').split('-')[0] || row.hour || '';
+      const room = (row.room || '').toString();
+      const head = decision === 'approved' ? '✅ 예약이 승인되었습니다.' : '❌ 예약 신청이 거절되었습니다.';
+      const msg = `${head}\n${row.team_name || ''} · ${dayLabel}요일 ${hour} ${room}`.slice(0, 200);
+      try {
+        await dbInsert('notifications', {
+          notif_type: 'reservation',
+          to_user_id: row.user_id,
+          from_user_id: currentUser?.id || '',
+          from_user_name: currentUser?.displayName || currentUser?.username || '관리자',
+          message: msg,
+          is_read: false,
+          data: { type: 'reservation_decision', decision, weekId: row.week_id, day: row.day_id, key: row.key },
+        });
+      } catch (e) { console.warn('알림 발송 실패:', e?.message); }
+      try {
+        const idToken = await auth.currentUser?.getIdToken();
+        if (idToken) await fetch(`${window.ENV.SUPABASE_URL}/functions/v1/admin-auth`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${window.ENV.SUPABASE_ANON_KEY}` },
+          body: JSON.stringify({ action: 'sendPush', idToken, externalUserIds: [row.user_id], title: head, body: `${row.team_name || ''} ${dayLabel}요일 ${hour}` }),
+        });
+      } catch {}
     }
 
     async function approvePendingReservation(weekId, day, key) {
-      await updateDoc(doc(db, `reservations/${weekId}/${day}`, key), { status: 'approved' });
+      const row = await dbGet('reservations', { week_id: weekId, day_id: day, key });
+      await dbUpdate('reservations', { week_id: weekId, day_id: day, key }, {
+        status: 'approved',
+        approved_by: currentUser?.displayName || currentUser?.username || '관리자',
+        updated_at: new Date().toISOString(),
+      });
       await addActivityLog('예약_승인', `${day} ${key}`, null, null);
+      await notifyReservationDecision(row, 'approved');
       showToast('예약을 승인했습니다.', 'success');
-      renderDashboard();
+      await renderDashboard();
     }
 
     async function rejectPendingReservation(weekId, day, key, teamName) {
-      await deleteDoc(doc(db, `reservations/${weekId}/${day}`, key));
+      const row = await dbGet('reservations', { week_id: weekId, day_id: day, key });
+      await dbDelete('reservations', { week_id: weekId, day_id: day, key });
       await addActivityLog('예약_거절', `${day} ${key} ${teamName || ''}`, null, null);
+      await notifyReservationDecision(row, 'rejected');
       showToast('예약 신청을 거절했습니다.', 'info');
-      renderDashboard();
+      await renderDashboard();
     }
 
     // ========== DASHBOARD STATS ==========
@@ -1930,6 +1978,7 @@
               await loadTeams();
               updateHeader();
               setActiveTab('dashboard');
+              setupAdminRealtime();
             } else {
               currentUser = null;
               updateHeader();

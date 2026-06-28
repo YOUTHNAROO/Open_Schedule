@@ -1,5 +1,20 @@
 import S from './state.js';
 import { HOURS } from './constants.js';
+import { supabase } from './supabase.js';
+
+// 태그(@멘션) 사용자 목록 캐시를 보장. 비어 있으면 즉시 로드(로그인 시점 로드 누락/타이밍 대비).
+let _usersCacheLoading = null;
+function ensureUsersCache() {
+    if (S.USERS_CACHE && S.USERS_CACHE.length) return Promise.resolve();
+    if (_usersCacheLoading) return _usersCacheLoading;
+    _usersCacheLoading = supabase.from('app_users').select('id, username, display_name, name')
+        .then(({ data }) => {
+            S.USERS_CACHE = (data || []).map(r => ({ id: r.id, username: r.username, displayName: r.display_name || r.name }));
+        })
+        .catch(() => {})
+        .finally(() => { _usersCacheLoading = null; });
+    return _usersCacheLoading;
+}
 
 function formatTime(isoStr) {
     if (!isoStr) return '';
@@ -49,6 +64,7 @@ function setupTagInput(el) {
             if (/[\s\n]/.test(val[i])) break;
         }
         if (at < 0) { dd.classList.add('hidden'); return; }
+        if (!S.USERS_CACHE || !S.USERS_CACHE.length) { ensureUsersCache().then(refresh); return; }
         const q = val.slice(at + 1, pos).toLowerCase();
         const hits = S.USERS_CACHE.filter(u =>
             (u.username || '').toLowerCase().includes(q) ||
@@ -93,6 +109,7 @@ function setupPersonTagInput(el) {
         if (_selecting) return;
         const q = (el.value || '').replace(/^@/, '').toLowerCase().trim();
         if (!q) { dd.classList.add('hidden'); return; }
+        if (!S.USERS_CACHE || !S.USERS_CACHE.length) { ensureUsersCache().then(refresh); return; }
         const hits = S.USERS_CACHE.filter(u =>
             (u.username || '').toLowerCase().includes(q) ||
             (u.displayName || '').toLowerCase().includes(q)

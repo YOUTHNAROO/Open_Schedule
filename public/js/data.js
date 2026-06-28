@@ -165,14 +165,21 @@ function subscribeToReservations() {
     S.unsubReservations = () => supabase.removeChannel(channel);
 }
 
-async function subscribeToFixedSchedules() {
-    if (S.unsubFixed) return;
-    S.unsubFixed = () => {};
-    try {
-        const rows = await dbGetMany('fixed_schedules', {});
-        S.fixedSchedules = rows.map(rowToFixedSchedule);
-        updateMergedReservationsAndRender();
-    } catch (err) { console.error('고정 일정 로드 실패:', err); }
+function subscribeToFixedSchedules() {
+    if (S.unsubFixed) { S.unsubFixed(); S.unsubFixed = null; }
+    const load = async () => {
+        try {
+            const rows = await dbGetMany('fixed_schedules', {});
+            S.fixedSchedules = rows.map(rowToFixedSchedule);
+            updateMergedReservationsAndRender();
+        } catch (err) { console.error('고정 일정 로드 실패:', err); }
+    };
+    // 고정일정 변경(관리자 추가/삭제)을 실시간 반영
+    const channel = supabase.channel('fixed-schedules-all')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'fixed_schedules' }, load)
+        .subscribe();
+    load();
+    S.unsubFixed = () => supabase.removeChannel(channel);
 }
 
 function subscribeToActivityLogs() {
