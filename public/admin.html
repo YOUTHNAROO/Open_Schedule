@@ -353,18 +353,20 @@
       return res.json().catch(() => ({}));
     }
 
-    async function loadLoginLogs(page = 1) {
-      const q = query(collection(db, 'login_logs'), orderBy('timestamp', 'desc'), limit(page * PAGE_SIZE));
-      const s = await getDocs(q);
-      const all = s.docs.map(d => ({ id: d.id, ...d.data() }));
-      return { logs: all.slice((page - 1) * PAGE_SIZE), total: all.length };
+    // 로그 검색을 위해 전체 로그를 한 번에 로드(최대 LOG_MAX)하고 캐시. 검색/페이지는 캐시 위에서 처리.
+    const LOG_MAX = 3000;
+    let _loginLogsCache = null, _activityLogsCache = null;
+    async function loadLoginLogs(force = false) {
+      if (_loginLogsCache && !force) return _loginLogsCache;
+      const s = await getDocs(query(collection(db, 'login_logs'), orderBy('timestamp', 'desc'), limit(LOG_MAX)));
+      _loginLogsCache = s.docs.map(d => ({ id: d.id, ...d.data() }));
+      return _loginLogsCache;
     }
-
-    async function loadActivityLogs(page = 1) {
-      const q = query(collection(db, 'activity_logs'), orderBy('timestamp', 'desc'), limit(page * PAGE_SIZE));
-      const s = await getDocs(q);
-      const all = s.docs.map(d => ({ id: d.id, ...d.data() }));
-      return { logs: all.slice((page - 1) * PAGE_SIZE), total: all.length };
+    async function loadActivityLogs(force = false) {
+      if (_activityLogsCache && !force) return _activityLogsCache;
+      const s = await getDocs(query(collection(db, 'activity_logs'), orderBy('timestamp', 'desc'), limit(LOG_MAX)));
+      _activityLogsCache = s.docs.map(d => ({ id: d.id, ...d.data() }));
+      return _activityLogsCache;
     }
 
     // 표시명 계산(회원가입 측 auth.js의 computeDisplayName과 동일 계약).
@@ -1004,37 +1006,9 @@
     }
 
     // ========== RENDER: USERS ==========
-    async function renderUsers() {
-      const panel = document.getElementById('panel-users');
-      if (!panel) return;
-      panel.innerHTML = `<div class="text-center py-16 text-slate-400"><div class="w-8 h-8 border-4 border-slate-200 border-t-teal-500 rounded-full animate-spin mx-auto mb-4"></div>로딩 중...</div>`;
-      const users = await loadUsers();
-      panel.innerHTML = `
-    <div class="flex items-center justify-between mb-4 flex-wrap gap-3">
-      <div>
-        <h2 class="text-base font-bold text-slate-800">사용자 관리</h2>
-        <p class="text-xs text-slate-400 mt-0.5">전체 ${users.length}명</p>
-      </div>
-      <div class="flex gap-2 flex-wrap">
-        <button onclick="openUserModal()" class="flex items-center gap-2 bg-teal-600 hover:bg-teal-700 text-white px-4 py-2 rounded-xl text-sm font-bold shadow-sm transition-all">
-          <i data-lucide="user-plus" class="w-4 h-4"></i> 새 사용자 추가
-        </button>
-      </div>
-    </div>
-    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-      <div class="overflow-x-auto">
-        <table class="w-full text-sm border-collapse">
-          <thead><tr class="bg-slate-50 border-b border-slate-200 text-left">
-            <th class="px-4 py-3 text-xs font-bold text-slate-500">아이디</th>
-            <th class="px-4 py-3 text-xs font-bold text-slate-500">이름</th>
-            <th class="px-4 py-3 text-xs font-bold text-slate-500">역할</th>
-            <th class="px-4 py-3 text-xs font-bold text-slate-500">활동단 권한</th>
-            <th class="px-4 py-3 text-xs font-bold text-slate-500">연락처</th>
-            <th class="px-4 py-3 text-xs font-bold text-slate-500">상태</th>
-            <th class="px-4 py-3 text-xs font-bold text-slate-500 text-right">작업</th>
-          </tr></thead>
-          <tbody class="divide-y divide-slate-50">
-            ${users.map(u => `
+    let _usersCache = [];
+    function userRowHTML(u) {
+      return `
               <tr class="hover:bg-slate-50 transition-colors" data-uid="${esc(u.id)}">
                 <td class="px-4 py-3 font-mono text-xs text-slate-700 font-semibold">${esc(u.username)}</td>
                 <td class="px-4 py-3 text-sm font-medium text-slate-800">${esc(u.displayName)}</td>
@@ -1059,13 +1033,62 @@
                <button onclick="handleHardDeleteUser(this)" data-uid="${esc(u.id)}" data-username="${esc(u.username)}" class="p-1.5 rounded-lg hover:bg-red-100 text-red-500 transition-colors" title="완전 삭제(계정까지 제거)"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button>`}
                   </div>
                 </td>
-              </tr>
-            `).join('')}
-          </tbody>
+              </tr>`;
+    }
+    function renderUserRows() {
+      const q = (document.getElementById('user-search')?.value || '').trim().toLowerCase();
+      const list = q ? _usersCache.filter(u =>
+        (u.username || '').toLowerCase().includes(q) ||
+        (u.displayName || '').toLowerCase().includes(q) ||
+        (u.name || '').toLowerCase().includes(q) ||
+        (u.phone || '').toLowerCase().includes(q)) : _usersCache;
+      const cnt = document.getElementById('user-count');
+      if (cnt) cnt.textContent = q ? `검색 결과 ${list.length}명 / 전체 ${_usersCache.length}명` : `전체 ${_usersCache.length}명`;
+      const tb = document.getElementById('user-tbody');
+      if (tb) tb.innerHTML = list.length ? list.map(userRowHTML).join('')
+        : `<tr><td colspan="7" class="text-center py-12 text-slate-400 text-sm">검색 결과가 없습니다</td></tr>`;
+      lucide.createIcons();
+    }
+    async function renderUsers() {
+      const panel = document.getElementById('panel-users');
+      if (!panel) return;
+      panel.innerHTML = `<div class="text-center py-16 text-slate-400"><div class="w-8 h-8 border-4 border-slate-200 border-t-teal-500 rounded-full animate-spin mx-auto mb-4"></div>로딩 중...</div>`;
+      _usersCache = await loadUsers();
+      panel.innerHTML = `
+    <div class="flex items-center justify-between mb-4 flex-wrap gap-3">
+      <div>
+        <h2 class="text-base font-bold text-slate-800">사용자 관리</h2>
+        <p class="text-xs text-slate-400 mt-0.5" id="user-count">전체 ${_usersCache.length}명</p>
+      </div>
+      <div class="flex gap-2 flex-wrap items-center">
+        <div class="relative">
+          <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2"></i>
+          <input id="user-search" type="text" placeholder="아이디·이름·연락처 검색" autocomplete="off"
+            class="w-56 pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400">
+        </div>
+        <button onclick="openUserModal()" class="flex items-center gap-2 bg-teal-600 hover:bg-teal-700 text-white px-4 py-2 rounded-xl text-sm font-bold shadow-sm transition-all">
+          <i data-lucide="user-plus" class="w-4 h-4"></i> 새 사용자 추가
+        </button>
+      </div>
+    </div>
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm border-collapse">
+          <thead><tr class="bg-slate-50 border-b border-slate-200 text-left">
+            <th class="px-4 py-3 text-xs font-bold text-slate-500">아이디</th>
+            <th class="px-4 py-3 text-xs font-bold text-slate-500">이름</th>
+            <th class="px-4 py-3 text-xs font-bold text-slate-500">역할</th>
+            <th class="px-4 py-3 text-xs font-bold text-slate-500">활동단 권한</th>
+            <th class="px-4 py-3 text-xs font-bold text-slate-500">연락처</th>
+            <th class="px-4 py-3 text-xs font-bold text-slate-500">상태</th>
+            <th class="px-4 py-3 text-xs font-bold text-slate-500 text-right">작업</th>
+          </tr></thead>
+          <tbody class="divide-y divide-slate-50" id="user-tbody"></tbody>
         </table>
       </div>
     </div>`;
-      lucide.createIcons();
+      document.getElementById('user-search')?.addEventListener('input', renderUserRows);
+      renderUserRows();
     }
 
     // ========== RENDER: TEAMS ==========
@@ -1108,17 +1131,24 @@
     }
 
     // ========== RENDER: LOGIN LOGS ==========
-    async function renderLoginLogs(page = 1) {
-      const panel = document.getElementById('panel-login-logs');
-      if (!panel) return;
-      panel.innerHTML = `<div class="text-center py-16 text-slate-400"><div class="w-8 h-8 border-4 border-slate-200 border-t-teal-500 rounded-full animate-spin mx-auto mb-4"></div>로딩 중...</div>`;
-      const { logs, total } = await loadLoginLogs(page);
+    const LOGIN_ACTION_LABEL = { login: '로그인', logout: '로그아웃', failed: '실패' };
+    function renderLoginLogResults(page = 1) {
+      const res = document.getElementById('login-log-results');
+      if (!res) return;
+      const q = (document.getElementById('login-log-search')?.value || '').trim().toLowerCase();
+      const all = _loginLogsCache || [];
+      const filtered = !q ? all : all.filter(l => {
+        const hay = `${l.username || ''} ${l.displayName || ''} ${l.ip || ''} ${LOGIN_ACTION_LABEL[l.action] || l.action || ''}`.toLowerCase();
+        return hay.includes(q);
+      });
+      const total = filtered.length;
+      const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+      page = Math.min(Math.max(1, page), totalPages);
+      const logs = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+      const cnt = document.getElementById('login-log-count');
+      if (cnt) cnt.textContent = q ? `검색 결과 ${total}건 / 전체 ${all.length}건` : `총 ${all.length}건`;
       const ACTION_STYLE = { login: 'bg-emerald-100 text-emerald-700', logout: 'bg-slate-100 text-slate-600', failed: 'bg-red-100 text-red-700' };
-      const totalPages = Math.ceil(total / PAGE_SIZE);
-      panel.innerHTML = `
-    <div class="flex items-center justify-between mb-4">
-      <div><h2 class="text-base font-bold text-slate-800">로그인 로그</h2><p class="text-xs text-slate-400">총 ${total}건</p></div>
-    </div>
+      res.innerHTML = `
     <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
       <div class="overflow-x-auto">
         <table class="w-full text-sm border-collapse">
@@ -1130,7 +1160,7 @@
             <th class="px-4 py-3 text-xs font-bold text-slate-500">시간</th>
           </tr></thead>
           <tbody class="divide-y divide-slate-50">
-            ${logs.length === 0 ? `<tr><td colspan="5" class="text-center py-12 text-slate-400 text-sm">로그인 기록이 없습니다</td></tr>` :
+            ${logs.length === 0 ? `<tr><td colspan="5" class="text-center py-12 text-slate-400 text-sm">${q ? '검색 결과가 없습니다' : '로그인 기록이 없습니다'}</td></tr>` :
           logs.map(l => `
               <tr class="hover:bg-slate-50 transition-colors">
                 <td class="px-4 py-3">
@@ -1147,25 +1177,52 @@
         </table>
       </div>
       ${totalPages > 1 ? `<div class="px-4 py-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
-        <button onclick="renderLoginLogs(${page - 1})" ${page <= 1 ? 'disabled class="opacity-30 cursor-not-allowed"' : 'class="hover:text-teal-600"'}>← 이전</button>
+        <button onclick="renderLoginLogResults(${page - 1})" ${page <= 1 ? 'disabled class="opacity-30 cursor-not-allowed"' : 'class="hover:text-teal-600"'}>← 이전</button>
         <span>${page} / ${totalPages}</span>
-        <button onclick="renderLoginLogs(${page + 1})" ${page >= totalPages ? 'disabled class="opacity-30 cursor-not-allowed"' : 'class="hover:text-teal-600"'}>다음 →</button>
+        <button onclick="renderLoginLogResults(${page + 1})" ${page >= totalPages ? 'disabled class="opacity-30 cursor-not-allowed"' : 'class="hover:text-teal-600"'}>다음 →</button>
       </div>`: ''}
     </div>`;
     }
-
-    // ========== RENDER: ACTIVITY LOGS ==========
-    async function renderActivityLogs(page = 1) {
-      const panel = document.getElementById('panel-activity-logs');
+    window.renderLoginLogResults = renderLoginLogResults;
+    async function renderLoginLogs() {
+      const panel = document.getElementById('panel-login-logs');
       if (!panel) return;
       panel.innerHTML = `<div class="text-center py-16 text-slate-400"><div class="w-8 h-8 border-4 border-slate-200 border-t-teal-500 rounded-full animate-spin mx-auto mb-4"></div>로딩 중...</div>`;
-      const { logs, total } = await loadActivityLogs(page);
-      const ACTION_COLOR = { '예약_생성': 'bg-emerald-100 text-emerald-700', '예약_취소': 'bg-slate-100 text-slate-600', '예약_강제취소': 'bg-red-100 text-red-700', '고정일정_추가': 'bg-blue-100 text-blue-700', '고정일정_삭제': 'bg-orange-100 text-orange-700', '주간리셋': 'bg-purple-100 text-purple-700', '사용자_생성': 'bg-teal-100 text-teal-700', '사용자_수정': 'bg-yellow-100 text-yellow-700', '사용자_삭제': 'bg-red-100 text-red-700', '활동단_추가': 'bg-indigo-100 text-indigo-700', '활동단_수정': 'bg-sky-100 text-sky-700', '활동단_삭제': 'bg-rose-100 text-rose-700' };
-      const totalPages = Math.ceil(total / PAGE_SIZE);
+      await loadLoginLogs(true);
       panel.innerHTML = `
-    <div class="flex items-center justify-between mb-4">
-      <div><h2 class="text-base font-bold text-slate-800">활동 로그</h2><p class="text-xs text-slate-400">총 ${total}건</p></div>
+    <div class="flex items-center justify-between mb-4 flex-wrap gap-3">
+      <div><h2 class="text-base font-bold text-slate-800">로그인 로그</h2><p class="text-xs text-slate-400" id="login-log-count">총 ${(_loginLogsCache || []).length}건</p></div>
+      <div class="relative">
+        <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2"></i>
+        <input id="login-log-search" type="text" placeholder="사용자·아이디·IP·상태 검색" autocomplete="off"
+          class="w-64 pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400">
+      </div>
     </div>
+    <div id="login-log-results"></div>`;
+      document.getElementById('login-log-search')?.addEventListener('input', () => renderLoginLogResults(1));
+      renderLoginLogResults(1);
+      lucide.createIcons();
+    }
+
+    // ========== RENDER: ACTIVITY LOGS ==========
+    const ACTIVITY_ACTION_COLOR = { '예약_생성': 'bg-emerald-100 text-emerald-700', '예약_취소': 'bg-slate-100 text-slate-600', '예약_강제취소': 'bg-red-100 text-red-700', '예약_승인': 'bg-emerald-100 text-emerald-700', '예약_거절': 'bg-red-100 text-red-700', '고정일정_추가': 'bg-blue-100 text-blue-700', '고정일정_삭제': 'bg-orange-100 text-orange-700', '주간리셋': 'bg-purple-100 text-purple-700', '사용자_생성': 'bg-teal-100 text-teal-700', '사용자_수정': 'bg-yellow-100 text-yellow-700', '사용자_삭제': 'bg-red-100 text-red-700', '사용자_완전삭제': 'bg-red-100 text-red-700', '활동단_추가': 'bg-indigo-100 text-indigo-700', '활동단_수정': 'bg-sky-100 text-sky-700', '활동단_삭제': 'bg-rose-100 text-rose-700' };
+    function renderActivityLogResults(page = 1) {
+      const res = document.getElementById('activity-log-results');
+      if (!res) return;
+      const q = (document.getElementById('activity-log-search')?.value || '').trim().toLowerCase();
+      const all = _activityLogsCache || [];
+      const filtered = !q ? all : all.filter(l => {
+        const note = l.after?.note || l.before?.note || '';
+        const hay = `${l.displayName || ''} ${l.username || ''} ${l.action || ''} ${l.target || ''} ${l.userRole || ''} ${note}`.toLowerCase();
+        return hay.includes(q);
+      });
+      const total = filtered.length;
+      const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+      page = Math.min(Math.max(1, page), totalPages);
+      const logs = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+      const cnt = document.getElementById('activity-log-count');
+      if (cnt) cnt.textContent = q ? `검색 결과 ${total}건 / 전체 ${all.length}건` : `총 ${all.length}건`;
+      res.innerHTML = `
     <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
       <div class="overflow-x-auto">
         <table class="w-full text-sm border-collapse">
@@ -1177,7 +1234,7 @@
             <th class="px-4 py-3 text-xs font-bold text-slate-500">시간</th>
           </tr></thead>
           <tbody class="divide-y divide-slate-50">
-            ${logs.length === 0 ? `<tr><td colspan="5" class="text-center py-12 text-slate-400 text-sm">활동 기록이 없습니다</td></tr>` :
+            ${logs.length === 0 ? `<tr><td colspan="5" class="text-center py-12 text-slate-400 text-sm">${q ? '검색 결과가 없습니다' : '활동 기록이 없습니다'}</td></tr>` :
           logs.map(l => {
             const note = l.after?.note || l.before?.note || '';
             const noteHtml = note ? `<div class="text-[10px] text-teal-600 mt-0.5 flex items-center gap-1 font-medium" title="${esc(note)}"><i data-lucide="message-square" class="w-2.5 h-2.5 flex-shrink-0"></i>${esc(note)}</div>` : '';
@@ -1188,7 +1245,7 @@
                   <div class="text-[10px] text-slate-400 font-mono">${esc(l.username)}</div>
                 </td>
                 <td class="px-4 py-3"><span class="px-1.5 py-0.5 text-[9px] font-bold rounded-full border ${ROLE_COLORS[l.userRole] || 'bg-slate-100 text-slate-600 border-slate-300'}">${ROLE_LABELS[l.userRole] || l.userRole}</span></td>
-                <td class="px-4 py-3"><span class="px-2 py-0.5 text-[10px] font-bold rounded-full ${ACTION_COLOR[l.action] || 'bg-slate-100 text-slate-600'}">${esc(l.action)}</span></td>
+                <td class="px-4 py-3"><span class="px-2 py-0.5 text-[10px] font-bold rounded-full ${ACTIVITY_ACTION_COLOR[l.action] || 'bg-slate-100 text-slate-600'}">${esc(l.action)}</span></td>
                 <td class="px-4 py-3 text-xs text-slate-600 max-w-[200px]">
                   <div class="truncate" title="${esc(l.target)}">${esc(l.target)}</div>
                   ${noteHtml}
@@ -1200,11 +1257,31 @@
         </table>
       </div>
       ${totalPages > 1 ? `<div class="px-4 py-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
-        <button onclick="renderActivityLogs(${page - 1})" ${page <= 1 ? 'disabled class="opacity-30 cursor-not-allowed"' : 'class="hover:text-teal-600"'}>← 이전</button>
+        <button onclick="renderActivityLogResults(${page - 1})" ${page <= 1 ? 'disabled class="opacity-30 cursor-not-allowed"' : 'class="hover:text-teal-600"'}>← 이전</button>
         <span>${page} / ${totalPages}</span>
-        <button onclick="renderActivityLogs(${page + 1})" ${page >= totalPages ? 'disabled class="opacity-30 cursor-not-allowed"' : 'class="hover:text-teal-600"'}>다음 →</button>
+        <button onclick="renderActivityLogResults(${page + 1})" ${page >= totalPages ? 'disabled class="opacity-30 cursor-not-allowed"' : 'class="hover:text-teal-600"'}>다음 →</button>
       </div>`: ''}
     </div>`;
+      lucide.createIcons();
+    }
+    window.renderActivityLogResults = renderActivityLogResults;
+    async function renderActivityLogs() {
+      const panel = document.getElementById('panel-activity-logs');
+      if (!panel) return;
+      panel.innerHTML = `<div class="text-center py-16 text-slate-400"><div class="w-8 h-8 border-4 border-slate-200 border-t-teal-500 rounded-full animate-spin mx-auto mb-4"></div>로딩 중...</div>`;
+      await loadActivityLogs(true);
+      panel.innerHTML = `
+    <div class="flex items-center justify-between mb-4 flex-wrap gap-3">
+      <div><h2 class="text-base font-bold text-slate-800">활동 로그</h2><p class="text-xs text-slate-400" id="activity-log-count">총 ${(_activityLogsCache || []).length}건</p></div>
+      <div class="relative">
+        <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2"></i>
+        <input id="activity-log-search" type="text" placeholder="사용자·작업·대상 검색" autocomplete="off"
+          class="w-64 pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400">
+      </div>
+    </div>
+    <div id="activity-log-results"></div>`;
+      document.getElementById('activity-log-search')?.addEventListener('input', () => renderActivityLogResults(1));
+      renderActivityLogResults(1);
       lucide.createIcons();
     }
 
