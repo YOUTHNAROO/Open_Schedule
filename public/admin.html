@@ -510,24 +510,9 @@
     // Firestore users 컬렉션 전체를 Supabase로 일괄 이관 (Bug 5)
     // 고아 Firebase 인증계정 정리: Supabase에 없는데 Firebase Auth에만 남은 계정을 완전 삭제.
     // (이전에 삭제됐지만 Firebase 계정이 남아 같은 아이디 생성/가입이 막히던 문제 해결)
-    window.cleanupOrphanAuth = async function () {
-      try {
-        showToast('고아 계정을 조회하는 중...', 'info');
-        const res = await callAdminAuthFn('listOrphans', {});
-        const orphans = res.orphans || [];
-        const count = res.count || orphans.length;
-        if (!count) { showToast('정리할 고아 계정이 없습니다.', 'success'); return; }
-        const names = orphans.slice(0, 30).map(o => (o.email || '').replace('@youthnaroo.local', '')).join(', ');
-        const ok = await showConfirm(
-          `Supabase에 없는 Firebase 인증 계정 ${count}개를 찾았습니다.\n\n${names}${count > 30 ? ' 외…' : ''}\n\n완전 삭제하면 같은 아이디로 새로 가입/생성할 수 있습니다. (최근 1시간 내 가입 계정은 자동 제외)\n삭제할까요?`,
-          { title: '고아 계정 정리', okText: `${count}개 완전 삭제`, danger: true }
-        );
-        if (!ok) return;
-        showToast('삭제 처리 중...', 'info');
-        const del = await callAdminAuthFn('purgeOrphans', {});
-        showToast(`${del.deleted || 0}개 고아 계정을 정리했습니다.`, 'success');
-      } catch (e) { showToast(koErr(e), 'error'); }
-    };
+    // (고아 계정 정리 버튼/함수는 제거됨 — 사용자 완전삭제 시 Firebase Auth 계정도 함께 삭제되고,
+    //  남은 잔여 계정이 있어도 같은 아이디 재생성/재가입 시 자동 재사용되므로 수동 정리 불필요.
+    //  Edge Function의 listOrphans/purgeOrphans 액션은 만약을 위해 서버에만 보존.)
 
     // (Firestore 일괄 이관 버튼/함수는 이관 완료 후 제거됨. 모든 신규 사용자 데이터는 Supabase에 기록되며,
     //  혹시 남은 레거시 계정이 있어도 로그인 시 auth.js의 migrateLegacyUserToSupabase가 자동 이관함.)
@@ -576,15 +561,18 @@
     async function createTeam(data) {
       await dbInsertResilient('teams', teamToRow(data));
       await addActivityLog('활동단_추가', data.name, null, data);
+      await loadTeams(); // 메모리 TEAMS 즉시 갱신(새로고침 없이 반영)
     }
     async function updateTeam(id, data, old) {
       const row = teamToRow(data); delete row.id;
       await dbUpdateResilient('teams', { id }, row);
       await addActivityLog('활동단_수정', data.name, old, data);
+      await loadTeams();
     }
     async function deleteTeam(id, name) {
       await dbDelete('teams', { id });
       await addActivityLog('활동단_삭제', name, null, null);
+      await loadTeams();
     }
 
     // ========== PENDING RESERVATIONS ==========
@@ -752,7 +740,6 @@
           <button type="button" onclick="icRemoveTeam('${esc(tid)}')" class="opacity-60 hover:opacity-100 font-bold leading-none ml-0.5">&times;</button>
         </span>`;
       }).join('') || '<span class="text-[11px] text-slate-400">활동단을 선택하세요 (선택)</span>';
-      if (typeof icUpdateAdvancedSummary === 'function') icUpdateAdvancedSummary();
     }
     window.icRemoveTeam = function (tid) { icTeamTags = icTeamTags.filter(x => x !== tid); icRenderTeamTags(); };
     function icUpdateMode() {
@@ -770,21 +757,6 @@
         staffDeptRow?.classList.add('hidden');
       }
     }
-    // 고급 옵션 요약 배지(권한/활동단/지정/개수가 기본과 다르면 표시)
-    function icUpdateAdvancedSummary() {
-      const el = document.getElementById('ic-advanced-summary');
-      if (!el) return;
-      const role = document.getElementById('ic-role')?.value || 'user';
-      const target = document.getElementById('ic-target-user')?.value.trim() || '';
-      const count = parseInt(document.getElementById('ic-count')?.value) || 1;
-      const parts = [];
-      if (role === 'admin') parts.push('관리자');
-      if (icTeamTags.length) parts.push(`활동단 ${icTeamTags.length}`);
-      if (target) parts.push('지정');
-      if (count > 1) parts.push(`${count}개`);
-      el.textContent = parts.length ? parts.join(' · ') : '기본값';
-      el.className = parts.length ? 'text-[10px] font-bold text-teal-600' : 'text-[10px] text-slate-400';
-    }
     window.openInviteCodeModal = function () {
       icTeamTags = [];
       const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
@@ -796,10 +768,30 @@
       if (sel) sel.innerHTML = '<option value="">+ 활동단 추가</option>' + TEAMS.map(t => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('');
       icRenderTeamTags();
       icUpdateMode();
-      icUpdateAdvancedSummary();
       showModal('invite-modal');
       lucide.createIcons();
     }
+
+    // 견고한 복사: navigator.clipboard 실패/미지원(비보안 컨텍스트 등) 시 execCommand로 폴백.
+    window.copyTextRobust = async function (text) {
+      try {
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(text);
+          showToast('복사되었습니다.', 'success');
+          return;
+        }
+        throw new Error('clipboard unavailable');
+      } catch {
+        try {
+          const ta = document.createElement('textarea');
+          ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+          document.body.appendChild(ta); ta.focus(); ta.select();
+          const ok = document.execCommand('copy');
+          document.body.removeChild(ta);
+          showToast(ok ? '복사되었습니다.' : '복사에 실패했습니다. 직접 선택해 복사해주세요.', ok ? 'success' : 'error');
+        } catch { showToast('복사에 실패했습니다. 직접 선택해 복사해주세요.', 'error'); }
+      }
+    };
 
     // 발급 결과 커스텀 팝업 표시
     function showInviteResult(codes, meta, allowedTeams) {
@@ -813,7 +805,7 @@
         list.innerHTML = codes.map(c => `
           <div class="flex items-center justify-between gap-2 px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl">
             <span class="font-mono font-bold tracking-[0.2em] text-slate-800 text-base">${esc(c)}</span>
-            <button type="button" onclick="navigator.clipboard&&navigator.clipboard.writeText('${esc(c)}').then(()=>showToast('복사되었습니다.','success'))" class="text-slate-400 hover:text-teal-600 p-1.5 rounded-lg hover:bg-white transition-colors" title="복사"><i data-lucide="copy" class="w-4 h-4"></i></button>
+            <button type="button" onclick="copyTextRobust('${esc(c)}')" class="text-slate-400 hover:text-teal-600 p-1.5 rounded-lg hover:bg-white transition-colors" title="복사"><i data-lucide="copy" class="w-4 h-4"></i></button>
           </div>`).join('');
       }
       showModal('ic-result-modal');
@@ -972,9 +964,6 @@
         <p class="text-xs text-slate-400 mt-0.5">전체 ${users.length}명</p>
       </div>
       <div class="flex gap-2 flex-wrap">
-        <button onclick="cleanupOrphanAuth()" class="flex items-center gap-2 bg-rose-600 hover:bg-rose-700 text-white px-4 py-2 rounded-xl text-sm font-bold shadow-sm transition-all" title="Supabase에 없는데 Firebase 인증에만 남은 계정을 완전 삭제(아이디 재사용 가능)">
-          <i data-lucide="user-x" class="w-4 h-4"></i> 고아 계정 정리
-        </button>
         <button onclick="openUserModal()" class="flex items-center gap-2 bg-teal-600 hover:bg-teal-700 text-white px-4 py-2 rounded-xl text-sm font-bold shadow-sm transition-all">
           <i data-lucide="user-plus" class="w-4 h-4"></i> 새 사용자 추가
         </button>
@@ -2124,21 +2113,9 @@
         finally { btn.disabled = false; btn.textContent = '발급'; }
       });
 
-      // 고급 옵션 창 열기/닫기/적용
-      document.getElementById('ic-advanced-btn')?.addEventListener('click', () => { showModal('ic-advanced-modal'); lucide.createIcons(); });
-      const closeAdvanced = () => { hideModal('ic-advanced-modal'); icUpdateAdvancedSummary(); };
-      document.getElementById('close-ic-advanced')?.addEventListener('click', closeAdvanced);
-      document.getElementById('ic-advanced-done')?.addEventListener('click', closeAdvanced);
-      document.getElementById('ic-target-user')?.addEventListener('input', icUpdateAdvancedSummary);
-      document.getElementById('ic-count')?.addEventListener('input', icUpdateAdvancedSummary);
-      document.getElementById('ic-role')?.addEventListener('change', icUpdateAdvancedSummary);
-
       // 발급 결과 커스텀 팝업
       document.getElementById('ic-result-close')?.addEventListener('click', () => hideModal('ic-result-modal'));
-      document.getElementById('ic-result-copy')?.addEventListener('click', () => {
-        const text = (window.__icLastCodes || []).join('\n');
-        navigator.clipboard?.writeText(text).then(() => showToast('복사되었습니다.', 'success')).catch(() => showToast('복사에 실패했습니다.', 'error'));
-      });
+      document.getElementById('ic-result-copy')?.addEventListener('click', () => copyTextRobust((window.__icLastCodes || []).join('\n')));
       document.getElementById('close-contrib-modal')?.addEventListener('click', () => hideModal('contributor-modal'));
       document.getElementById('contributor-modal')?.addEventListener('click', e => { if (e.target === document.getElementById('contributor-modal')) hideModal('contributor-modal'); });
 
@@ -2644,16 +2621,30 @@
         <button id="close-invite-modal" class="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100"><i data-lucide="x" class="w-5 h-5"></i></button>
       </div>
       <form id="invite-form" class="p-5 flex flex-col gap-3">
-        <div>
-          <label class="block text-xs font-semibold text-slate-600 mb-1.5">구분</label>
-          <select id="ic-usertype" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-teal-400">
-            <option value="youth">🧒 청소년</option>
-            <option value="staff">🧑‍🏫 직원/교사</option>
-          </select>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1.5">구분</label>
+            <select id="ic-usertype" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-teal-400">
+              <option value="youth">🧒 청소년</option>
+              <option value="staff">🧑‍🏫 직원/교사</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1.5">권한</label>
+            <select id="ic-role" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-teal-400">
+              <option value="user">일반 사용자</option>
+              <option value="admin">관리자</option>
+            </select>
+          </div>
         </div>
         <div>
           <label class="block text-xs font-semibold text-slate-600 mb-1.5">이름 <span class="text-slate-400 font-normal">(선택)</span></label>
           <input id="ic-name" type="text" placeholder="초대 대상 이름" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400 placeholder-slate-300">
+        </div>
+        <div id="ic-team-row">
+          <label class="block text-xs font-semibold text-slate-600 mb-1.5">활동단 <span class="text-slate-400 font-normal">(선택 · 복수 가능)</span></label>
+          <div id="ic-team-tags" class="flex flex-wrap gap-1.5 mb-2"></div>
+          <select id="ic-team-pick" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-teal-400"></select>
         </div>
         <div id="ic-dept-toggle-row" class="border border-slate-200 rounded-xl p-3 bg-slate-50/60">
           <label class="flex items-center justify-between cursor-pointer">
@@ -2666,36 +2657,6 @@
           <label class="block text-xs font-semibold text-slate-600 mb-1.5">부서 <span class="text-slate-400 font-normal">(직원 · 선택)</span></label>
           <input id="ic-staff-dept" type="text" placeholder="예: 운영지원팀" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400 placeholder-slate-300">
         </div>
-        <!-- 고급 옵션: 권한/활동단/지정사용자/개수는 별도 창에서 -->
-        <button type="button" id="ic-advanced-btn" class="flex items-center justify-between w-full px-3 py-2.5 text-sm border border-dashed border-slate-300 rounded-xl text-slate-600 hover:border-teal-400 hover:text-teal-600 hover:bg-teal-50/40 transition-all">
-          <span class="flex items-center gap-1.5"><i data-lucide="sliders-horizontal" class="w-4 h-4"></i> 고급 옵션</span>
-          <span id="ic-advanced-summary" class="text-[10px] text-slate-400">기본값</span>
-        </button>
-        <button type="submit" class="w-full bg-teal-600 hover:bg-teal-700 text-white font-bold py-2.5 rounded-xl transition-all text-sm shadow-sm mt-1">발급</button>
-      </form>
-    </div>
-  </div>
-
-  <!-- 초대코드 고급 옵션 (별도 창) -->
-  <div id="ic-advanced-modal" class="hidden fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm border border-slate-200 overflow-hidden max-h-[90vh] overflow-y-auto">
-      <div class="flex items-center justify-between p-5 border-b border-slate-100">
-        <h2 class="font-bold text-slate-800 flex items-center gap-1.5"><i data-lucide="sliders-horizontal" class="w-4 h-4 text-teal-600"></i> 고급 옵션</h2>
-        <button id="close-ic-advanced" type="button" class="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100"><i data-lucide="x" class="w-5 h-5"></i></button>
-      </div>
-      <div class="p-5 flex flex-col gap-3">
-        <div>
-          <label class="block text-xs font-semibold text-slate-600 mb-1.5">권한</label>
-          <select id="ic-role" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-teal-400">
-            <option value="user">일반 사용자</option>
-            <option value="admin">관리자</option>
-          </select>
-        </div>
-        <div id="ic-team-row">
-          <label class="block text-xs font-semibold text-slate-600 mb-1.5">활동단 <span class="text-slate-400 font-normal">(선택 · 복수 가능)</span></label>
-          <div id="ic-team-tags" class="flex flex-wrap gap-1.5 mb-2"></div>
-          <select id="ic-team-pick" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-teal-400"></select>
-        </div>
         <div class="grid grid-cols-2 gap-3">
           <div>
             <label class="block text-xs font-semibold text-slate-600 mb-1.5">지정 사용자 <span class="text-slate-400 font-normal">(선택)</span></label>
@@ -2706,8 +2667,8 @@
             <input id="ic-count" type="number" min="1" max="50" value="1" class="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-400">
           </div>
         </div>
-        <button id="ic-advanced-done" type="button" class="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-2.5 rounded-xl transition-all text-sm shadow-sm mt-1">적용</button>
-      </div>
+        <button type="submit" class="w-full bg-teal-600 hover:bg-teal-700 text-white font-bold py-2.5 rounded-xl transition-all text-sm shadow-sm mt-1">발급</button>
+      </form>
     </div>
   </div>
 

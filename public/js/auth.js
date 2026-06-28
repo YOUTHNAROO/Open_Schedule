@@ -62,8 +62,8 @@ function refreshRegDisplayName() {
 
     const hint = document.getElementById('reg-dispname-hint');
     if (hint) {
-        if (userType === 'staff') hint.textContent = '직원: [부서/]이름 형식으로 생성됩니다.';
-        else hint.textContent = '청소년: [활동단/][부서/]이름 형식으로 생성됩니다.';
+        if (userType === 'staff') hint.textContent = '표시명은 [부서]/[이름] 형식으로 자동 생성됩니다.';
+        else hint.textContent = '표시명은 [활동단]/[부서]/[이름] 형식으로 자동 생성됩니다.';
     }
     // 제출 버튼 활성화: 이름이 있어야 표시명 계산 가능
     const btn = document.getElementById('reg-submit-btn');

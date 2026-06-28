@@ -31,7 +31,7 @@ async function initApp() {
 
     // Event listeners
     document.getElementById('login-form')?.addEventListener('submit', handleLoginSubmit);
-    document.getElementById('close-login-modal')?.addEventListener('click', () => { if (S.currentUser) hideModal('login-modal'); });
+    document.getElementById('close-login-modal')?.addEventListener('click', () => hideModal('login-modal'));
     document.getElementById('register-form')?.addEventListener('submit', handleRegister);
     // 보안 질문 옵션
     const secQEl = document.getElementById('reg-sec-q');
