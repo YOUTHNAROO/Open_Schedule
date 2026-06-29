@@ -30,7 +30,7 @@
 | 🧱 **앱** | 예약 시스템 + 청소년 커뮤니티 | `2` 개 |
 | 📦 **프런트 모듈** | `public/js` ES 모듈 + 커뮤니티 모듈 | `~24` 개 |
 | 🔐 **서버리스** | Supabase Edge Function (Deno) | `admin-auth` |
-| 💸 **운영비** | 무과금(Spark/Free) 유지 설계 | 이미지도 base64로 Firestore 저장 |
+| 💸 **운영비** | 무과금 운영 (Firebase Spark · Supabase Free) | 이미지도 base64로 Firestore에 저장 |
 
 ---
 
@@ -85,29 +85,32 @@ flowchart TD
     CDN -.-> A2
 ```
 
-> 💡 **핵심 패턴** — 인증은 Firebase 하나로 공유하고, **예약 데이터는 Supabase**, **커뮤니티는 Firestore**로 분리합니다. 클라이언트가 직접 못 하는 작업(계정 삭제·비밀번호 재설정·푸시 발송)만 **Edge Function**이 처리합니다.
+> 💡 **핵심 패턴** — 인증은 Firebase 하나로 공유하고, **예약 데이터는 Supabase에**, **커뮤니티는 Firestore에** 나눠 둡니다. 클라이언트 권한으로는 처리할 수 없는 작업(계정 삭제 · 비밀번호 재설정 · 푸시 발송)만 **Edge Function**이 맡습니다.
 
 ---
 
 ## 🧱 두 개의 앱
 
 ```mermaid
-flowchart LR
+flowchart TB
     subgraph RSV["📅 예약 시스템 · Supabase 기반"]
-        R1["주간 시간표 · 실시간 예약"]
-        R2["활동단/부서/표시명 체계"]
-        R3["승인 대기 → 승인/거절 + 알림"]
-        R4["고정일정 · 전용시간 · 주간리셋 · 아카이브"]
-        R5["관리자: 사용자·활동단·초대코드·로그·시트연동"]
+        direction LR
+        R1["주간 시간표<br/>실시간 예약"]
+        R2["활동단 · 부서<br/>표시명 체계"]
+        R3["승인 대기<br/>승인 · 거절 · 알림"]
+        R4["고정일정 · 전용시간<br/>주간리셋 · 아카이브"]
+        R5["관리자<br/>사용자 · 초대코드 · 로그"]
         R1 --- R2 --- R3 --- R4 --- R5
     end
     subgraph COM["💬 커뮤니티 · Firestore 기반"]
-        C1["익명/실명 게시판 · 좋아요 · 댓글"]
-        C2["번개 모임 · 1:1 익명채팅(읽음·수정/삭제)"]
-        C3["실시간 접속자 수 · 인앱 알림"]
-        C4["이미지 base64 저장(무과금)"]
+        direction LR
+        C1["익명/실명 게시판<br/>좋아요 · 댓글"]
+        C2["번개 모임<br/>1:1 익명채팅"]
+        C3["실시간 접속자 수<br/>인앱 알림"]
+        C4["이미지 base64 저장<br/>(무과금)"]
         C1 --- C2 --- C3 --- C4
     end
+    RSV ~~~ COM
 ```
 
 ---
@@ -132,12 +135,14 @@ active_sessions  접속 세션(예약앱)
 </td><td valign="top">
 
 ```text
-community_posts / comments   게시판·댓글
-chat_rooms/{id}/messages     1:1 익명채팅
-meetups                      번개 모임
-community_presence           커뮤니티 접속자
-post images (base64 subcol)  이미지(무과금)
-login_logs / activity_logs   로그
+community_posts/{id}          게시글
+  └ comments / images / reports  댓글·이미지(base64)·신고
+community_boards              게시판 정의
+community_meetups             번개 모임
+chat_rooms/{id}/messages      1:1 익명채팅 (+ chat_queue 매칭)
+community_presence            커뮤니티 접속자
+notifications/{uid}/items     인앱 알림
+login_logs / activity_logs    로그
 system_settings              시트 연동 설정
 contributors                 기여자
 users / user_recovery        레거시(이관 소스)
@@ -160,7 +165,7 @@ sequenceDiagram
 
     U->>DB: 예약 신청 (status=pending)
     DB-->>RT: 변경 이벤트
-    RT-->>A: 대시보드 자동 갱신(새로고침 X)
+    RT-->>A: 대시보드 자동 갱신 (새로고침 없이)
     A->>DB: 승인 (status=approved)
     A->>DB: notifications insert
     A->>EF: sendPush(idToken)
@@ -175,34 +180,34 @@ sequenceDiagram
 
 ```text
 public/
-├── index.html              예약 앱(사용자)        ┐ Firebase Auth 공유
-├── admin.html              예약 앱(관리자)        ┘ env.js → window.ENV 필수
-├── env.js                  실제 키 (gitignore)
-├── env.example.js          키 템플릿
+├── index.html      예약 앱 (사용자)
+├── admin.html      예약 앱 (관리자)
+├── env.js          실제 키 — gitignore, 모듈보다 먼저 로드
+├── env.example.js  키 템플릿
 ├── css/ · photos/ · assets/
 │
-├── js/                     예약 앱 ES 모듈
-│   ├── app.js              부트스트랩 · 인증 상태
-│   ├── firebase.js         Firebase 초기화(Auth)
-│   ├── supabase.js         Supabase 클라이언트 + CRUD/구독 헬퍼
-│   ├── auth.js             로그인·회원가입·레거시 자동이관
-│   ├── data.js             예약/고정일정/룸블록 실시간 구독
-│   ├── reservations.js     예약 생성/취소/댓글
-│   ├── render.js · sidebar.js · mobile.js   UI 렌더
-│   ├── notifications.js · push.js           알림 · OneSignal
-│   ├── sheets.js           Google Sheets 연동
-│   ├── custom-select.js    자체 디자인 셀렉트 위젯
-│   └── utils.js · ui.js · state.js · constants.js · crypto.js …
+├── js/             예약 앱 ES 모듈
+│   ├── app.js            부트스트랩 · 인증 상태
+│   ├── firebase.js       Firebase 초기화 (Auth)
+│   ├── supabase.js       Supabase 클라이언트 · CRUD/구독 헬퍼
+│   ├── auth.js           로그인 · 회원가입 · 레거시 자동이관
+│   ├── data.js           예약/고정일정/룸블록 실시간 구독
+│   ├── reservations.js   예약 생성 · 취소 · 댓글
+│   ├── render.js         시간표 렌더 (+ sidebar.js · mobile.js)
+│   ├── notifications.js  인앱 알림 (+ push.js · OneSignal)
+│   ├── sheets.js         Google Sheets 연동
+│   ├── custom-select.js  자체 디자인 셀렉트 위젯
+│   └── utils · ui · state · constants · crypto …
 │
-└── community/              커뮤니티 앱
-    ├── home·board·write·post-detail·profile·notifications.html
-    ├── meetup.html · chat.html        번개 · 1:1 익명채팅
-    ├── community-data.js              Firestore 데이터 레이어
-    └── community-ui.js                렌더 · linkify · 접속자 배지
+└── community/        커뮤니티 앱
+    ├── home/board/write/post-detail/profile/notifications.html
+    ├── meetup.html · chat.html  번개 · 1:1 익명채팅
+    ├── community-data.js        Firestore 데이터 레이어
+    └── community-ui.js          렌더 · linkify · 접속자 배지
 
-supabase/functions/admin-auth/         Edge Function (Deno)
-firestore.rules · storage.rules        보안 규칙
-firebase.json · .github/workflows/     호스팅 · CI/CD
+supabase/functions/admin-auth/      Edge Function (Deno)
+firestore.rules · storage.rules     보안 규칙
+firebase.json · .github/workflows/  호스팅 · CI/CD
 ```
 
 ---
@@ -225,7 +230,7 @@ firebase.json · .github/workflows/     호스팅 · CI/CD
 ## ⚙️ 핵심 구현 포인트
 
 - **실시간 동기화** — Supabase `postgres_changes` 채널로 예약/알림/고정일정을 즉시 반영. 로그인/로그아웃 시 구독 교체로 메모리 누수 방지.
-- **하이브리드 인증** — Firebase Auth 세션 + Supabase anon 키(RLS). 같은 세션으로 두 앱이 동작.
+- **하이브리드 인증** — Firebase Auth 세션 + Supabase anon 키(RLS). 한 번의 로그인으로 두 앱이 같은 세션을 공유.
 - **무과금 설계** — Cloud Functions·Firebase Storage 미사용. 이미지는 WebP 압축 후 base64로 Firestore 하위컬렉션에 저장.
 - **보안** — OneSignal REST 키는 클라이언트 비노출(Edge Function 경유). `env.js`는 gitignore.
 - **자체 디자인 UI** — 모든 `<select>`를 커스텀 드롭다운 위젯으로 대체(네이티브 동작 보존).
